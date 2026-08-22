@@ -18,6 +18,12 @@
 | 平台 | Linux / macOS / Windows（无 POSIX 专用调用） |
 | 主目录 | 优先 `$HOME`，Windows 下等价 `%USERPROFILE%`；cookie 路径：`~/.cache/netune/cookies.txt` |
 
+### 移植纪律
+
+- **Go 源码是唯一规格**：锚定 v1.6.0，不追上游。
+- **双跑对照代替单测**：固定随机 key 后与 Python 镜像（逐行翻译自 cryto.go）比对输出。
+- **坑位显式化**：Go 特有行为（见第六节坑位表）全部写成注释 + 测试用例。
+
 ## 二、目录结构
 
 ```
