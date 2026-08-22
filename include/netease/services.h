@@ -28,6 +28,13 @@ ne_resp *ne_song_url_v1(const char *id, const char *level);
 /* SongUrlService — linuxapi /api/song/enhance/player/url, cookie os=pc */
 ne_resp *ne_song_url_old(const char *id, const char *br);
 
+/* SongDownloadUrlService — CallWeapi /weapi/song/enhance/download/url/v1,
+ * the official download endpoint (kept separate from the play URL). data
+ * {id, level} — id is a single value, not an array; level empty → "standard".
+ * Original apiservice: no corresponding Go service, ported from the Go
+ * netease-cli shell's song-download-url command. */
+ne_resp *ne_song_download_url(const char *id, const char *level);
+
 /* SongDetailService — weapi/v3/song/detail, cookie os=pc;
  * ids_csv "1,2,3" → c=[{"id":"1"},..], ids=[1,2,3] */
 ne_resp *ne_song_detail(const char *ids_csv);

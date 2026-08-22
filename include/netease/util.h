@@ -25,4 +25,19 @@ static inline char *ne_xstrdup(const char *s) {
 /* millisecond / second unix timestamps */
 int64_t ne_now_ms(void);
 int64_t ne_now_unix(void);
+
+/* thread-local storage keyword: GCC/Clang use __thread, MSVC __declspec(thread) */
+#ifdef _MSC_VER
+#define NE_THREAD_LOCAL __declspec(thread)
+#else
+#define NE_THREAD_LOCAL __thread
+#endif
+
+/* POSIX string helpers MSVC lacks: strtok_s has the same signature as
+ * strtok_r, _stricmp/_strnicmp are the case-insensitive comparisons */
+#ifdef _MSC_VER
+#define strtok_r strtok_s
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#endif
 #endif

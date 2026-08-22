@@ -78,6 +78,8 @@ SONGURL_V1 = ('{"code":200,"data":[{"code":200,"url":"http://a/v1.mp3",'
               '"freeTrialInfo":{"start":0,"end":30}}]}')
 SONGURL_OLD = ('{"code":200,"data":[{"code":200,"url":"http://a/old.mp3",'
                '"br":320000}]}')
+SONGURL_DL = ('{"code":200,"data":{"code":200,"url":"http://a/dl.mp3",'
+              '"br":320000,"size":12345}}')
 CHECKURL = '{"code":200,"data":[{"code":200,"url":"http://a/check.mp3"}]}'
 RECENT = ('{"code":200,"data":{"list":[{"playCount":3,'
           '"song":{"id":111,"name":"歌&A"}}]}}')
@@ -123,6 +125,8 @@ def dispatch(state, conn, url, cookie):
         return respond_raw(conn, RENAME)
     if "cloudsearch/pc" in url:
         return respond_raw(conn, SEARCH)
+    if "song/enhance/download/url/v1" in url:
+        return respond_raw(conn, SONGURL_DL)
     if "song/enhance/player/url/v1" in url:
         return respond_raw(conn, SONGURL_V1)
     if "song/enhance/player/url" in url:
@@ -434,7 +438,10 @@ def load_qr_fixture():
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "fixtures", "qr_render_expected.txt"),
               "rb") as f:
-        return f.read()
+        data = f.read()
+    # normalize CRLF (Windows checkout) → LF so the byte compare passes
+    # regardless of how the fixture file was saved
+    return data.replace(b"\r\n", b"\n")
 
 
 def png_ok(b64_text):
@@ -467,7 +474,8 @@ def build_cases(stub):
          check=lambda out: png_ok(out), seed=False)
     case("qr-render", ["qr-render",
                        "https://music.163.com/login?codekey=abc123"],
-         check=lambda out: out.encode("utf-8") == load_qr_fixture(),
+         check=lambda out: out.replace("\r\n", "\n").encode("utf-8")
+             == load_qr_fixture(),
          seed=False)
 
     # ── read family (passthrough: stub bytes + newline) ──
@@ -511,6 +519,12 @@ def build_cases(stub):
     case("song-url fallback", ["song-url", "111"],
          stdout='{"code":200,"data":'
                 '[{"br":320000,"code":200,"url":"http://a/old.mp3"}]}\n')
+    case("song-download-url", ["song-download-url", "111"],
+         stdout='{"code":200,"data":[{"br":320000,"code":200,"size":12345,'
+                '"url":"http://a/dl.mp3"}]}\n')
+    case("song-download-url level", ["song-download-url", "111", "lossless"],
+         stdout='{"code":200,"data":[{"br":320000,"code":200,"size":12345,'
+                '"url":"http://a/dl.mp3"}]}\n')
 
     # ── qr family ──
     case("qr-key", ["qr-key"],
@@ -554,6 +568,8 @@ def build_cases(stub):
     case("unknown cmd", ["bogus"], stderr="unknown cmd: bogus\n", rc=1)
     case("song-url missing id", ["song-url"],
          stderr="usage: netease-cli song-url <id> [level]\n", rc=1)
+    case("song-download-url missing id", ["song-download-url"],
+         stderr="usage: netease-cli song-download-url <id> [level]\n", rc=1)
     case("qr-render missing url", ["qr-render"],
          stderr="usage: netease-cli qr-render <url>\n", rc=1)
     case("liked parse account failed", ["liked"], garbage=True,

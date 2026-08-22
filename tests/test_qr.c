@@ -12,6 +12,36 @@
 
 #include "netease/qrenc.h"
 
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
+
+/* recursive mkdir -p (avoids shelling out; matches main.c's mkpath) */
+static void mkpath2(const char *path) {
+    char tmp[1024];
+    snprintf(tmp, sizeof tmp, "%s", path);
+    size_t l = strlen(tmp);
+    if (l > 0 && tmp[l - 1] == '/') tmp[l - 1] = '\0';
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+#if defined(_WIN32)
+            _mkdir(tmp);
+#else
+            mkdir(tmp, 0755);
+#endif
+            *p = '/';
+        }
+    }
+#if defined(_WIN32)
+    _mkdir(tmp);
+#else
+    mkdir(tmp, 0755);
+#endif
+}
+
 static const char *CASES[] = {
     "https://music.163.com/login?codekey=abc123XYZ",
     "https://example.org/PATH/to-somewhere-else",
@@ -72,10 +102,10 @@ static void dump(const char *dir, int i, const char *content) {
 int main(void) {
     const char *dir = getenv("NE_QR_DUMP");
     if (!dir || !*dir) dir = "/tmp/neqr";
-    char cmd[600];
-    snprintf(cmd, sizeof cmd, "rm -rf '%s' && mkdir -p '%s'", dir, dir);
-    if (system(cmd) != 0) return 2;
-
+    /* create the dump dir cross-platform without shelling out; the Windows
+     * `mkdir`/`rmdir` shell commands can be blocked by sandboxes and the
+     * failure would be silent (fopen(NULL) → crash) */
+    mkpath2(dir);
     for (size_t i = 0; i < sizeof CASES / sizeof *CASES; i++)
         dump(dir, (int)i, CASES[i]);
 

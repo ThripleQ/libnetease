@@ -129,6 +129,21 @@ ne_resp *ne_song_url_old(const char *id, const char *br) {
     return ne_call_linuxapi(url, data, COOKIES_OS_PC);
 }
 
+/* ── song_download_url (original apiservice — no Go service) ── */
+ne_resp *ne_song_download_url(const char *id, const char *level) {
+    if (!level || !*level) level = "standard";
+
+    jmap *data = jmap_new();
+    jmap_put(data, "id", id);
+    jmap_put(data, "level", level);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/song/enhance/download/url/v1",
+             ne_api_base());
+    ne_resp *r = ne_call_weapi(url, data);
+    jmap_free(data);
+    return r;
+}
+
 /* ── song_detail_service.go ────────────────────────────── */
 ne_resp *ne_song_detail(const char *ids_csv) {
     /* c: [{"id":".."},...] — one entry per comma piece, input order;

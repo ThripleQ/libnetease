@@ -116,7 +116,7 @@ static ne_http_resp *do_request(const char *url, const char *post_body,
     /* expose set-cookies through a hidden channel: caller re-fetches via
      * ne_http_last_setcookies (single-threaded CLI, acceptable) */
     {
-        extern __thread char *g_last_setcookies;
+        extern NE_THREAD_LOCAL char *g_last_setcookies;
         free(g_last_setcookies);
         g_last_setcookies = m.setcookies.p ? m.setcookies.p : ne_xstrdup("");
     }
@@ -127,7 +127,7 @@ static ne_http_resp *do_request(const char *url, const char *post_body,
 }
 
 /* thread-local set-cookie sink (single-threaded CLI usage) */
-__thread char *g_last_setcookies;
+NE_THREAD_LOCAL char *g_last_setcookies;
 
 const char *ne_http_last_setcookies(void) { return g_last_setcookies; }
 

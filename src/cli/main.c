@@ -7,6 +7,8 @@
 
 #if defined(_WIN32)
 #include <direct.h>
+#include <fcntl.h>
+#include <io.h>
 #else
 #include <sys/stat.h>
 #endif
@@ -328,6 +330,35 @@ static int cmd_song_url(const char *id, const char *level_in) {
     ne_jval_put(out, "code", ne_jval_new_num_d(final_code));
     print_marshal(out);
     free(final_body);
+    return 0;
+}
+
+/* song-download-url <id> [level] — official download endpoint (original
+ * apiservice). data comes back as a single object; wrap it in an array so
+ * the C consumer parses it like the play-URL response. */
+static int cmd_song_download_url(const char *id, const char *level_in) {
+    const char *level = level_in ? level_in : "standard";
+    ne_resp *r = ne_song_download_url(id, level);
+    if (r->err) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "download url failed: err=%d", r->err);
+        ne_resp_free(r);
+        die(msg);
+    }
+    ne_jval *root = NULL;
+    if (!parse_root(r->body, &root)) {
+        ne_resp_free(r);
+        die("bad download url response");
+    }
+    ne_jval *d = ne_jval_get(root, "data");
+    if (d && ne_jval_type(d) == NE_JV_OBJ) {
+        ne_jval *arr = ne_jval_new(NE_JV_ARR);
+        ne_jval_push(arr, ne_jval_clone(d));
+        ne_jval_put(root, "data", arr);
+    }
+    ne_jval_put(root, "code", ne_jval_new_num_d(r->code));
+    ne_resp_free(r);
+    print_marshal(root);
     return 0;
 }
 
@@ -656,6 +687,13 @@ static int cmd_track(const char *op, const char *pid, const char *sid) {
 }
 
 int main(int argc, char **argv) {
+#if defined(_WIN32)
+    /* Go's os.Stdout is binary mode (no \n→\r\n translation); match it so
+     * the C shell stays byte-identical on Windows */
+    _setmode(_fileno(stdout), _O_BINARY);
+    _setmode(_fileno(stderr), _O_BINARY);
+#endif
+
     if (argc < 2) {
         fprintf(stderr, "usage: netease-cli <cmd> [args...]\n");
         return 1;
@@ -722,6 +760,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "song-url") == 0) {
         if (argc < 3) die("usage: netease-cli song-url <id> [level]");
         rc = cmd_song_url(argv[2], argc > 3 ? argv[3] : NULL);
+    } else if (strcmp(cmd, "song-download-url") == 0) {
+        if (argc < 3) die("usage: netease-cli song-download-url <id> [level]");
+        rc = cmd_song_download_url(argv[2], argc > 3 ? argv[3] : NULL);
     } else if (strcmp(cmd, "song-detail") == 0) {
         if (argc < 3) die("usage: netease-cli song-detail <ids>");
         rc = pass(ne_song_detail(argv[2]));
