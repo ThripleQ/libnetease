@@ -493,7 +493,8 @@ def build_cases(stub):
 
     # ── offline commands ──
     case("login-status", ["login-status"],
-         stdout_re=r'^\{"status":"check [^"]*/\.cache/netune/cookies\.txt"\}\n$',
+         stdout_re=(r'^\{"status":"check [^"]*[\\/]\.cache[\\/]netune'
+                    r'[\\/]cookies\.txt"\}\n$'),
          seed=False)
     case("qr-image", ["qr-image",
                       "https://music.163.com/login?codekey=abc123"],

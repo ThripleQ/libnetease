@@ -917,7 +917,19 @@ int main(int argc, char **argv) {
         if (argc < 3) die("usage: netease-cli qr-check <unikey>");
         rc = cmd_qr_check(argv[2]);
     } else if (strcmp(cmd, "login-status") == 0) {
-        printf("{\"status\":\"check %s\"}\n", ne_cookie_file());
+        /* Go's cookiePath comes from filepath.Join → native backslashes on
+         * Windows; render the same so output is byte-identical */
+        const char *cf = ne_cookie_file();
+#if defined(_WIN32)
+        char wpath[1024];
+        size_t cl = strlen(cf);
+        for (size_t i = 0; i < cl && i < sizeof(wpath) - 1; i++)
+            wpath[i] = (cf[i] == '/') ? '\\' : cf[i];
+        wpath[cl < sizeof(wpath) - 1 ? cl : sizeof(wpath) - 1] = '\0';
+        printf("{\"status\":\"check %s\"}\n", wpath);
+#else
+        printf("{\"status\":\"check %s\"}\n", cf);
+#endif
     } else if (strcmp(cmd, "search") == 0) {
         char *s = join_args(argc, argv, 2);
         rc = pass(ne_search(s, "1", "100", NULL));
