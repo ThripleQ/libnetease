@@ -129,7 +129,13 @@ ne_resp *ne_song_url_old(const char *id, const char *br) {
     return ne_call_linuxapi(url, data, COOKIES_OS_PC);
 }
 
-/* ── song_download_url (original apiservice — no Go service) ── */
+/* ── song_download_url (original apiservice — no Go service) ──
+ * Endpoint pinned from chaunsin/netease-cloud-music SongDownloadUrlV1:
+ * POST /weapi/song/enhance/download/url/v1 with body {id, level}
+ * (immerseType only for sky). The path is also intercepted by
+ * UnblockNeteaseMusic/server and go-musicfox's vendored copy. Unlike
+ * player/url/v1, free tracks (fee==0) can get up to Hi-Res here, so the
+ * download channel is kept separate; response data is a single object. */
 ne_resp *ne_song_download_url(const char *id, const char *level) {
     if (!level || !*level) level = "standard";
 
