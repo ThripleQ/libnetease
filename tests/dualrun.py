@@ -125,14 +125,25 @@ def respond_raw(handler, text):
 
 
 def dispatch(state, conn, url, cookie):
-    # eapi rename (url is the request path here)
-    if "playlist/update/name" in url:
+    # linuxapi inner urls arrive as absolute http://host/api/... (request.c
+    # forwards the full rewritten url); weapi/eapi arrive as bare /weapi|/eapi
+    # paths. Collapse both to a pure path so the routes below compare exactly.
+    if "://" in url:
+        authority = url.split("://", 1)[1]
+        url = "/" + authority.split("/", 1)[1] if "/" in authority else "/"
+    url = url.split("?")[0].split("#")[0]
+    # Exact-path routing only. Every path below is the precise wire path the
+    # C client emits (weapi → /weapi/..., linuxapi inner url → /api/...,
+    # eapi → /eapi/...). Substring matching previously let a typo'd path
+    # (e.g. full/vip/info vs front/vip/info) silently pass; an unknown path
+    # now falls through to 404 and fails the output diff.
+    if url == "/eapi/playlist/update/name":
         return respond_raw(conn, RENAME)
-    if "cloudsearch/pc" in url:
+    if url == "/weapi/cloudsearch/pc":
         return respond_raw(conn, SEARCH)
-    if "song/enhance/download/url/v1" in url:
+    if url == "/weapi/song/enhance/download/url/v1":
         return respond_raw(conn, SONGURL_DL)
-    if "song/enhance/player/url/v1" in url:
+    if url == "/weapi/song/enhance/player/url/v1":
         # check-quality probes a single level; the weapi params are
         # encrypted so the stub can't read the level — vary the verdict
         # via seeded marker cookies instead
@@ -141,15 +152,16 @@ def dispatch(state, conn, url, cookie):
         if "QOK" in cookie:
             return respond_raw(conn, SONGURL_OK)
         return respond_raw(conn, SONGURL_V1)
-    if "song/enhance/player/url" in url:
+    if url in ("/weapi/song/enhance/player/url",       # weapi (check-music)
+               "/api/song/enhance/player/url"):        # linuxapi inner (song-url old)
         return respond_raw(conn, SONGURL_OLD)
-    if "song/lyric" in url:
+    if url == "/api/song/lyric":                       # linuxapi inner
         return respond_raw(conn, LYRIC)
-    if "play-record/song/list" in url:
+    if url == "/weapi/play-record/song/list":
         return respond_raw(conn, RECENT)
-    if "music-vip-membership" in url:
+    if url == "/weapi/music-vip-membership/front/vip/info":
         return respond_raw(conn, VIP_INFO)
-    if "nuser/account/get" in url:
+    if url == "/weapi/nuser/account/get":
         if "GARBAGE" in cookie:   # HTML instead of JSON
             body = b"<html>not json</html>"
             conn.send_response(200)
@@ -160,45 +172,45 @@ def dispatch(state, conn, url, cookie):
             conn.wfile.flush()
             return
         return respond_raw(conn, ACCOUNT)
-    if "v3/song/detail" in url:
+    if url == "/weapi/v3/song/detail":
         return respond_raw(conn, SONGS)
-    if "v3/playlist/detail" in url:
+    if url == "/api/v3/playlist/detail":               # linuxapi inner
         return respond_raw(conn, PLAYLIST_DETAIL)
-    if "user/playlist" in url:
+    if url == "/weapi/user/playlist":
         return respond_raw(conn, USER_PLAYLIST)
-    if "login/qrcode/unikey" in url:
+    if url == "/weapi/login/qrcode/unikey":
         return respond_raw(conn, QRKEY)
-    if "login/qrcode/client/login" in url:
+    if url == "/weapi/login/qrcode/client/login":
         # qr-check is double-encrypted weapi (stub can't read the
         # key) — dispatch on a marker cookie instead: seeded
         # QRDONE=1 → 803 confirmed with a server cookie string
         if "QRDONE" in cookie:
             return respond_raw(conn, QRCHECK_OK)
         return respond_raw(conn, QRCHECK_WAIT)
-    if "song/like/get" in url:
+    if url == "/weapi/song/like/get":
         return respond_raw(conn, LIKEIDS)
-    if "song/like" in url:
+    if url == "/weapi/song/like":
         return respond_raw(conn, LIKE_WRITE)
-    if "playlist/subscribe" in url or "playlist/unsubscribe" in url:
+    if url in ("/weapi/playlist/subscribe", "/weapi/playlist/unsubscribe"):
         return respond_raw(conn, OK)
-    if "playlist/manipulate/tracks" in url:
+    if url == "/weapi/playlist/manipulate/tracks":
         return respond_raw(conn, TRACKS_OP)
-    if "playlist/create" in url:
+    if url == "/weapi/playlist/create":
         return respond_raw(conn, CREATE)
-    if "playlist/remove" in url:
+    if url == "/weapi/playlist/remove":
         return respond_raw(conn, OK)
-    if url.endswith("/api/login") or url.endswith("/api/login/") \
-            or url.endswith("/weapi/login") or url.endswith("/weapi/login/"):
+    if url in ("/api/login", "/api/login/", "/weapi/login", "/weapi/login/"):
         return respond_raw(conn, LOGIN_EMAIL)
-    if "login/cellphone" in url:
+    if url == "/weapi/login/cellphone":
         return respond_raw(conn, LOGIN_CELL)
-    if "login/token/refresh" in url:
+    if url == "/weapi/login/token/refresh":
         return respond_raw(conn, OK)
-    if "toplist/detail" in url:
+    if url == "/weapi/toplist/detail":
         return respond_raw(conn, TOPLIST)
-    if "recommend/resource" in url or "personalized/playlist" in url:
+    if url in ("/weapi/v1/discovery/recommend/resource",
+               "/weapi/personalized/playlist"):
         return respond_raw(conn, RECOMMEND_RES)
-    if "recommend/songs" in url:
+    if url == "/weapi/v3/discovery/recommend/songs":
         return respond_raw(conn, RECOMMEND_SONGS)
     return respond_raw(conn, '{"code":404,"message":"no stub ' + url + '"}')
 
