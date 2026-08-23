@@ -47,13 +47,14 @@ void ne_jar_reload(void) {
     if (g_jar) ne_jar_free(g_jar);
     g_jar = ne_jar_new();
     if (g_cookie_path) ne_jar_load_file(g_jar, g_cookie_path);
-    /* GetGlobalCookieJar: ensure sDeviceId exists (v1.6.0 behaviour) */
+    /* GetGlobalCookieJar: ensure sDeviceId exists (v1.6.0 behaviour).
+       Pick from the real-device pool like request.go, NOT random hex —
+       random hex sDeviceId reads as an unknown client to netease's
+       risk control (this was the QR-login risk-control trigger). */
     if (!ne_jar_get(g_jar, "sDeviceId")) {
-        static const char hexchars[] = "0123456789ABCDEF";
-        char id[53];
-        for (int i = 0; i < 52; i++) id[i] = hexchars[ne_rand_below(16)];
-        id[52] = '\0';
+        char *id = ne_random_device_id();
         ne_jar_set(g_jar, "sDeviceId", id);
+        free(id);
     }
 }
 
