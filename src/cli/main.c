@@ -386,6 +386,28 @@ static int cmd_song_download_url(const char *id, const char *level_in) {
     return 0;
 }
 
+/* song-music-quality <id> — dump the track's per-tier source table
+ * (l/m/h/sq/hr/je/sk/jm → {br,size,...}) straight from the response. The
+ * caller uses this to decide which levels a track actually has. */
+static int cmd_song_music_quality(const char *id) {
+    ne_resp *r = ne_song_music_quality(id);
+    if (r->err) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "song music quality failed: err=%d", r->err);
+        ne_resp_free(r);
+        die(msg);
+    }
+    ne_jval *root = NULL;
+    if (!parse_root(r->body, &root)) {
+        ne_resp_free(r);
+        die("bad song music quality response");
+    }
+    ne_jval_put(root, "code", ne_jval_new_num_d(r->code));
+    ne_resp_free(r);
+    print_marshal(root);
+    return 0;
+}
+
 /* check-quality <id> <level> — single-level entitlement probe. Requests
  * EXACTLY the given level from player/url/v1 (no fallback, no quality
  * ladder) and reports the server's verdict verbatim: granted / free_trial /
@@ -929,6 +951,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "song-download-url") == 0) {
         if (argc < 3) die("usage: netease-cli song-download-url <id> [level]");
         rc = cmd_song_download_url(argv[2], argc > 3 ? argv[3] : NULL);
+    } else if (strcmp(cmd, "song-music-quality") == 0) {
+        if (argc < 3) die("usage: netease-cli song-music-quality <id>");
+        rc = cmd_song_music_quality(argv[2]);
     } else if (strcmp(cmd, "song-detail") == 0) {
         if (argc < 3) die("usage: netease-cli song-detail <ids>");
         rc = pass(ne_song_detail(argv[2]));

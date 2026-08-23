@@ -150,6 +150,23 @@ ne_resp *ne_song_download_url(const char *id, const char *level) {
     return r;
 }
 
+/* ── song_music_quality (original apiservice — no Go service) ──
+ * Endpoint pinned from chaunsin/netease-cloud-music SongMusicQuality:
+ * POST /weapi/song/music/detail/get with body {songId}. Returns the per
+ * quality-tier source table (l/m/h/sq/hr/je/sk/jm → {br,size,...}), which
+ * is the authoritative answer for "what levels does this track actually
+ * have". A nil tier means that level has no source. */
+ne_resp *ne_song_music_quality(const char *id) {
+    jmap *data = jmap_new();
+    jmap_put(data, "songId", id);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/song/music/detail/get",
+             ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
 /* ── song_detail_service.go ────────────────────────────── */
 ne_resp *ne_song_detail(const char *ids_csv) {
     /* c: [{"id":".."},...] — one entry per comma piece, input order;

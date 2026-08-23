@@ -35,6 +35,12 @@ ne_resp *ne_song_url_old(const char *id, const char *br);
  * netease-cli shell's song-download-url command. */
 ne_resp *ne_song_download_url(const char *id, const char *level);
 
+/* SongMusicQualityService — weapi/song/music/detail/get {songId}: returns
+ * the track's per-tier source table (l/m/h/sq/hr/je/sk/jm → {br,size}).
+ * Authoritative answer for which levels actually have a source; a nil tier
+ * means that level has no file. Pinned from chaunsin/netease-cloud-music. */
+ne_resp *ne_song_music_quality(const char *id);
+
 /* SongDetailService — weapi/v3/song/detail, cookie os=pc;
  * ids_csv "1,2,3" → c=[{"id":"1"},..], ids=[1,2,3] */
 ne_resp *ne_song_detail(const char *ids_csv);
