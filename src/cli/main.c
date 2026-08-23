@@ -167,28 +167,6 @@ static int account_uid(long long *uid) {
     return 1;
 }
 
-/* profile.vipType from UserAccountService body (0 ordinary, 11 black-vinyl
- * VIP); returns 1 with *vip set, 0 on unparseable body */
-static int account_vip_type(long long *vip) {
-    ne_resp *r = ne_user_account();
-    ne_jval *root = NULL;
-    if (!parse_root(r->body, &root)) {
-        ne_resp_free(r);
-        return 0;
-    }
-    long long v = 0;
-    ne_jval *prof = ne_jval_get(root, "profile");
-    if (prof && ne_jval_type(prof) == NE_JV_OBJ) {
-        ne_jval *vt = ne_jval_get(prof, "vipType");
-        if (vt && ne_jval_type(vt) == NE_JV_NUM)
-            v = (long long)ne_jval_num(vt);
-    }
-    ne_jval_free(root);
-    ne_resp_free(r);
-    *vip = v;
-    return 1;
-}
-
 /* ── qr-key / qr-check (phase 4) ───────────────────────── */
 
 static int cmd_qr_key(void) {

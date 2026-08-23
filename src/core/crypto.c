@@ -9,10 +9,10 @@
 #include <stdio.h>
 #include <string.h>
 
-static const uint8_t IV[16]        = "0102030405060708";
-static const uint8_t PRESET_KEY[16]= "0CoJUm6Qyw8W8jud";
-static const uint8_t LINUX_KEY[16] = "rFgB&h#%2?^eDg:Q";
-static const uint8_t EAPI_KEY[16]  = "e82ckenh8dichen8";
+static const uint8_t IV[16]        = {'0','1','0','2','0','3','0','4','0','5','0','6','0','7','0','8'};
+static const uint8_t PRESET_KEY[16]= {'0','C','o','J','U','m','6','Q','y','w','8','W','8','j','u','d'};
+static const uint8_t LINUX_KEY[16] = {'r','F','g','B','&','h','#','%','2','?','^','e','D','g',':','Q'};
+static const uint8_t EAPI_KEY[16]  = {'e','8','2','c','k','e','n','h','8','d','i','c','h','e','n','8'};
 
 int ne_weapi_det(const jmap *data,
                  const char secret_key[16], const char re_secret_key[16],

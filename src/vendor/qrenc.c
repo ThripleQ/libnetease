@@ -612,7 +612,6 @@ static int build_symbol(const ne_qr_version *v, int mask, const bits_t *data,
     /* format info */
     int fmt_id = mask & 0x7; /* Medium => level bits 0b000 */
     uint32_t f = FMT_SEQ[fmt_id];
-    int l = FMT_BITS - 1;
     /* Go writes f.At(l-i) with i ascending; its Bitset stores MSB-first but
      * AppendUint32(15) lands bit14..bit0 at positions 0..14, so At(l-i) walks
      * bit0 first.  Use (f >> i) & 1 to match (zbar reads this layout). */
@@ -801,9 +800,6 @@ ne_qr *ne_qr_new(const char *content, const char **err_out) {
         }
         fprintf(stderr, "\n");
     }
-    int total_blocks = 0;
-    for (int b = 0; b < chosen->num_block_specs; b++)
-        total_blocks += chosen->block[b].num_blocks;
     bits_t blk[128];
     int ec_off[128], blk_len[128], nblk = 0;
     long start = 0, end = 0;
