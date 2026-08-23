@@ -34,7 +34,9 @@ char *ne_qr_get_key(double *code_out, char **body_out, size_t *body_len) {
     char url[640];
     snprintf(url, sizeof url, "%s/weapi/login/qrcode/unikey",
              ne_api_base());
-    ne_resp *r = ne_create_weapi(url, data, NULL);
+    /* CallWeapi path (request.go): clean web request — no os/appver/NMTID
+       injection, matching the working Go login flow. */
+    ne_resp *r = ne_create_weapi_clean(url, data);
     jmap_free(data);
 
     if (code_out) *code_out = r->code;
@@ -63,7 +65,7 @@ char *ne_qr_check(const char *unikey, double *code_out, size_t *body_len) {
     char url[640];
     snprintf(url, sizeof url, "%s/weapi/login/qrcode/client/login",
              ne_api_base());
-    ne_resp *r = ne_create_weapi(url, data, NULL);
+    ne_resp *r = ne_create_weapi_clean(url, data);
     jmap_free(data);
 
     if (code_out) *code_out = r->code;

@@ -213,10 +213,15 @@ char *ne_rewrite_api_segment(const char *url, const char *replacement) {
 
 /* shared CreateRequest transport for weapi/linuxapi: cookie assembly
  * (jar + extras + __remember_me/os/appver [+ _ntes_nuid] [+ NMTID on login
- * URLs], checked against the ORIGINAL url like request.go) */
+ * URLs], checked against the ORIGINAL url like request.go).
+ * With clean=1 the anti-fraud cookie injection is skipped and the request
+ * carries only the jar cookies verbatim — this is the CallWeapi / NewRequest
+ * path (request.go:375/298) used by login flows, which must NOT advertise a
+ * mobile os/appver alongside a web chainId (that mismatch is what netease
+ * risk-control flags on QR login). */
 static ne_resp *post_common(const char *orig_url, const char *post_url,
                             const char *form, const char *ua,
-                            const char *const *extra_cookies) {
+                            const char *const *extra_cookies, int clean) {
     if (!g_jar) ne_jar_reload();
 
     const char *os = "ios";
@@ -239,18 +244,20 @@ static ne_resp *post_common(const char *orig_url, const char *post_url,
     for (size_t i = 0; extra_cookies && extra_cookies[2 * i]; i++)
         if (extra_cookies[2 * i + 1])
             ne_jar_set(scratch, extra_cookies[2 * i], extra_cookies[2 * i + 1]);
-    ne_jar_set(scratch, "__remember_me", "true");
-    ne_jar_set(scratch, "os", os);
-    ne_jar_set(scratch, "appver", appver);
-    if (ne_jar_get(scratch, "MUSIC_U")) {
-        char *nuid = rand_hex_of_16();
-        ne_jar_set(scratch, "_ntes_nuid", nuid);
-        free(nuid);
-    }
-    if (strstr(orig_url, "login")) {
-        char *nmtid = rand_hex_of_16();
-        ne_jar_set(scratch, "NMTID", nmtid);   /* request-level random */
-        free(nmtid);
+    if (!clean) {
+        ne_jar_set(scratch, "__remember_me", "true");
+        ne_jar_set(scratch, "os", os);
+        ne_jar_set(scratch, "appver", appver);
+        if (ne_jar_get(scratch, "MUSIC_U")) {
+            char *nuid = rand_hex_of_16();
+            ne_jar_set(scratch, "_ntes_nuid", nuid);
+            free(nuid);
+        }
+        if (strstr(orig_url, "login")) {
+            char *nmtid = rand_hex_of_16();
+            ne_jar_set(scratch, "NMTID", nmtid);   /* request-level random */
+            free(nmtid);
+        }
     }
 
     char *cookies = ne_jar_cookie_header(scratch);
@@ -279,7 +286,33 @@ ne_resp *ne_create_weapi(const char *url, jmap *data,
     char *form = ne_http_form_encode(kv, 2);
     char *final_url = ne_rewrite_api_segment(url, "/weapi/");
 
-    ne_resp *r = post_common(url, final_url, form, UA_PC, extra_cookies);
+    ne_resp *r = post_common(url, final_url, form, UA_PC, extra_cookies, 0);
+    free(form); free(final_url);
+    ne_weapi_free(&enc);
+    return r;
+}
+
+/* CallWeapi-equivalent transport for login flows: no anti-fraud cookie
+ * injection (no os/appver/NMTID), clean web request like request.go's
+ * NewRequest path. */
+ne_resp *ne_create_weapi_clean(const char *url, jmap *data) {
+    if (!g_jar) ne_jar_reload();
+
+    const char *csrf = ne_jar_get(g_jar, "__csrf");
+    jmap_put(data, "csrf_token", csrf ? csrf : "");
+
+    ne_weapi_result enc;
+    if (ne_weapi(data, &enc) != 0) {
+        ne_resp *r = ne_xmalloc(sizeof(ne_resp));
+        r->code = 520; r->body = ne_xstrdup("encode failed");
+        r->body_len = strlen(r->body); r->err = 1;
+        return r;
+    }
+    const char *kv[4] = { "params", enc.params, "encSecKey", enc.enc_sec_key };
+    char *form = ne_http_form_encode(kv, 2);
+    char *final_url = ne_rewrite_api_segment(url, "/weapi/");
+
+    ne_resp *r = post_common(url, final_url, form, UA_PC, NULL, 1);
     free(form); free(final_url);
     ne_weapi_free(&enc);
     return r;
@@ -316,7 +349,7 @@ ne_resp *ne_call_linuxapi(const char *url, jmap *data,
     const char *kv[2] = { "eparams", eparams };
     char *form = ne_http_form_encode(kv, 1);
 
-    ne_resp *r = post_common(url, fwd, form, UA_LINUX, extra_cookies);
+    ne_resp *r = post_common(url, fwd, form, UA_LINUX, extra_cookies, 0);
     free(form); free(eparams);
     return r;
 }
@@ -405,7 +438,7 @@ ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
     if (ma && *ma) { extras[n++] = "MUSIC_A"; extras[n++] = ma; }
     extras[n] = NULL;
 
-    ne_resp *r = post_common(url, final_url, form, UA_PC, extras);
+    ne_resp *r = post_common(url, final_url, form, UA_PC, extras, 0);
     free(form); free(final_url); free(params); free(device_id);
     return r;
 }

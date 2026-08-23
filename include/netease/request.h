@@ -41,6 +41,10 @@ ne_resp *ne_call_weapi(const char *api, const jmap *data);
  * pairs. NOTE: `data` is modified (csrf_token added). */
 ne_resp *ne_create_weapi(const char *url, jmap *data,
                          const char *const *extra_cookies);
+/* CallWeapi-equivalent transport for login flows: no anti-fraud cookie
+ * injection (no os/appver/NMTID), clean web request like request.go's
+ * NewRequest path. */
+ne_resp *ne_create_weapi_clean(const char *url, jmap *data);
 
 /* util.CreateRequest(..., {Crypto:"linuxapi"}) — payload
  * {method, url(/api/), params} AES-ECB encrypted, POSTed to
