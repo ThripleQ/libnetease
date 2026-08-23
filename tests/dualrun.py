@@ -63,7 +63,7 @@ SDEVICE = "CAFE0000CAFE0000CAFE0000CAFE0000CAFE0000CAFE0000"
 
 # ── canned responses (raw compact JSON — passthrough cmds print these bytes) ──
 ACCOUNT = ('{"code":200,"account":{"id":12345,"userName":"u@x"},'
-           '"profile":{"nickname":"测试用户"}}')
+           '"profile":{"nickname":"测试用户","vipType":11}}')
 LIKEIDS = '{"code":200,"ids":[111,222,333]}'
 SONGS = ('{"code":200,"songs":['
          '{"id":111,"name":"歌&A","ar":[{"name":"张三"}]},'
@@ -80,6 +80,11 @@ SONGURL_OLD = ('{"code":200,"data":[{"code":200,"url":"http://a/old.mp3",'
                '"br":320000}]}')
 SONGURL_DL = ('{"code":200,"data":{"code":200,"url":"http://a/dl.mp3",'
               '"br":320000,"size":12345}}')
+SONGURL_OK = ('{"code":200,"data":[{"code":200,"url":"http://a/v1.mp3",'
+              '"br":320000,"level":"exhigh"}]}')
+SONGURL_DENY = ('{"code":200,"data":[{"code":-460,"msg":"need vip"}]}')
+VIP_INFO = ('{"code":200,"data":{"redVipLevel":5,"redVipAnnualCount":-1,'
+            '"redVipExpireTime":1700000000000}}')
 CHECKURL = '{"code":200,"data":[{"code":200,"url":"http://a/check.mp3"}]}'
 RECENT = ('{"code":200,"data":{"list":[{"playCount":3,'
           '"song":{"id":111,"name":"歌&A"}}]}}')
@@ -128,6 +133,13 @@ def dispatch(state, conn, url, cookie):
     if "song/enhance/download/url/v1" in url:
         return respond_raw(conn, SONGURL_DL)
     if "song/enhance/player/url/v1" in url:
+        # check-quality probes a single level; the weapi params are
+        # encrypted so the stub can't read the level — vary the verdict
+        # via seeded marker cookies instead
+        if "QDENY" in cookie:
+            return respond_raw(conn, SONGURL_DENY)
+        if "QOK" in cookie:
+            return respond_raw(conn, SONGURL_OK)
         return respond_raw(conn, SONGURL_V1)
     if "song/enhance/player/url" in url:
         return respond_raw(conn, SONGURL_OLD)
@@ -135,6 +147,8 @@ def dispatch(state, conn, url, cookie):
         return respond_raw(conn, LYRIC)
     if "play-record/song/list" in url:
         return respond_raw(conn, RECENT)
+    if "music-vip-membership" in url:
+        return respond_raw(conn, VIP_INFO)
     if "nuser/account/get" in url:
         if "GARBAGE" in cookie:   # HTML instead of JSON
             body = b"<html>not json</html>"
@@ -495,6 +509,9 @@ def build_cases(stub):
 
     # ── derived-output commands (Go json.Marshal semantics) ──
     case("account-name", ["account-name"], stdout="测试用户\n")
+    case("account-info", ["account-info"],
+         stdout='{"login":true,"name":"测试用户","vipType":11}\n')
+    case("vip-info", ["vip-info"], stdout=VIP_INFO + "\n")
     case("check-music", ["check-music", "111"],
          stdout='{"code":200,"playable":true}\n')
     case("liked-check hit", ["liked-check", "111"],
@@ -525,6 +542,28 @@ def build_cases(stub):
     case("song-download-url level", ["song-download-url", "111", "lossless"],
          stdout='{"code":200,"data":[{"br":320000,"code":200,"size":12345,'
                 '"url":"http://a/dl.mp3"}]}\n')
+
+    # ── quality entitlement (single-level probe, no fallback/ladder) ──
+    case("song-url lossless ok", ["song-url", "111", "lossless"],
+         stdout='{"code":200,"data":[{"br":320000,"code":200,'
+                '"url":"http://a/old.mp3"}]}\n')
+    case("song-url bad level", ["song-url", "111", "flac"],
+         stderr="bad level: flac\n", rc=1)
+    case("song-download-url bad level", ["song-download-url", "111", "flac"],
+         stderr="bad level: flac\n", rc=1)
+    case("check-quality granted", ["check-quality", "111", "exhigh"],
+         stdout='{"code":200,"granted":true,"granted_br":320000,'
+                '"granted_level":"exhigh","reason":"ok","requested":"exhigh"}\n',
+         seed_extra=[("QOK", "1")])
+    case("check-quality trial", ["check-quality", "111", "lossless"],
+         stdout='{"code":200,"granted":false,"granted_br":0,'
+                '"granted_level":"","reason":"free_trial","requested":"lossless"}\n')
+    case("check-quality denied", ["check-quality", "111", "hires"],
+         stdout='{"code":-460,"granted":false,"granted_br":0,'
+                '"granted_level":"","reason":"denied","requested":"hires"}\n',
+         seed_extra=[("QDENY", "1")])
+    case("check-quality bad level", ["check-quality", "111", "flac"],
+         stderr="bad level: flac\n", rc=1)
 
     # ── qr family ──
     case("qr-key", ["qr-key"],

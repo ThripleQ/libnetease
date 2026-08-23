@@ -167,6 +167,28 @@ static int account_uid(long long *uid) {
     return 1;
 }
 
+/* profile.vipType from UserAccountService body (0 ordinary, 11 black-vinyl
+ * VIP); returns 1 with *vip set, 0 on unparseable body */
+static int account_vip_type(long long *vip) {
+    ne_resp *r = ne_user_account();
+    ne_jval *root = NULL;
+    if (!parse_root(r->body, &root)) {
+        ne_resp_free(r);
+        return 0;
+    }
+    long long v = 0;
+    ne_jval *prof = ne_jval_get(root, "profile");
+    if (prof && ne_jval_type(prof) == NE_JV_OBJ) {
+        ne_jval *vt = ne_jval_get(prof, "vipType");
+        if (vt && ne_jval_type(vt) == NE_JV_NUM)
+            v = (long long)ne_jval_num(vt);
+    }
+    ne_jval_free(root);
+    ne_resp_free(r);
+    *vip = v;
+    return 1;
+}
+
 /* ── qr-key / qr-check (phase 4) ───────────────────────── */
 
 static int cmd_qr_key(void) {
@@ -271,7 +293,25 @@ static int cmd_check_music(const char *id) {
     return 0;
 }
 
+/* level whitelist — mirrors service.SongQualityLevel.IsValid (v1.6.0):
+ * standard/higher/exhigh/lossless/hires/jyeffect/sky/jymaster */
+static int ne_level_valid(const char *level) {
+    static const char *const kLevels[] = {
+        "standard", "higher", "exhigh", "lossless", "hires",
+        "jyeffect", "sky", "jymaster", NULL
+    };
+    if (!level || !*level) return 0;
+    for (int i = 0; kLevels[i]; i++)
+        if (strcmp(level, kLevels[i]) == 0) return 1;
+    return 0;
+}
+
 static int cmd_song_url(const char *id, const char *level_in) {
+    if (level_in && !ne_level_valid(level_in)) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "bad level: %s", level_in);
+        die(msg);
+    }
     const char *level = level_in ? level_in : "standard";
 
     /* V1 first; restricted → fall back to the old linuxapi endpoint */
@@ -338,6 +378,11 @@ static int cmd_song_url(const char *id, const char *level_in) {
  * apiservice). data comes back as a single object; wrap it in an array so
  * the C consumer parses it like the play-URL response. */
 static int cmd_song_download_url(const char *id, const char *level_in) {
+    if (level_in && !ne_level_valid(level_in)) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "bad level: %s", level_in);
+        die(msg);
+    }
     const char *level = level_in ? level_in : "standard";
     ne_resp *r = ne_song_download_url(id, level);
     if (r->err) {
@@ -360,6 +405,77 @@ static int cmd_song_download_url(const char *id, const char *level_in) {
     ne_jval_put(root, "code", ne_jval_new_num_d(r->code));
     ne_resp_free(r);
     print_marshal(root);
+    return 0;
+}
+
+/* check-quality <id> <level> — single-level entitlement probe. Requests
+ * EXACTLY the given level from player/url/v1 (no fallback, no quality
+ * ladder) and reports the server's verdict verbatim: granted / free_trial /
+ * denied / no_url / no_data, plus the bitrate/level actually granted. */
+static int cmd_check_quality(const char *id, const char *level) {
+    if (!ne_level_valid(level)) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "bad level: %s", level);
+        die(msg);
+    }
+    ne_resp *r = ne_song_url_v1(id, level);
+    if (r->err) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "quality check failed: err=%d", r->err);
+        ne_resp_free(r);
+        die(msg);
+    }
+    ne_jval *root = NULL;
+    if (!parse_root(r->body, &root)) {
+        ne_resp_free(r);
+        die("bad quality check response");
+    }
+    int granted = 0;
+    const char *reason = "no_data";
+    double item_code = 0;
+    int has_code = 0;
+    double br = 0;
+    const char *glevel = "";
+    ne_jval *items = ne_jval_get(root, "data");
+    ne_jval *item = NULL;
+    if (items && ne_jval_type(items) == NE_JV_ARR && ne_jval_len(items) > 0)
+        item = ne_jval_at(items, 0);
+    if (item) {
+        ne_jval *ic = ne_jval_get(item, "code");
+        if (ic && ne_jval_type(ic) == NE_JV_NUM) {
+            item_code = ne_jval_num(ic);
+            has_code = 1;
+        }
+        ne_jval *u = ne_jval_get(item, "url");
+        const char *url = (u && ne_jval_type(u) == NE_JV_STR)
+                          ? ne_jval_str(u) : "";
+        ne_jval *ft = ne_jval_get(item, "freeTrialInfo");
+        int trial = ft && ne_jval_type(ft) != NE_JV_NULL;
+        ne_jval *b = ne_jval_get(item, "br");
+        if (b && ne_jval_type(b) == NE_JV_NUM) br = ne_jval_num(b);
+        ne_jval *lv = ne_jval_get(item, "level");
+        if (lv && ne_jval_type(lv) == NE_JV_STR) glevel = ne_jval_str(lv);
+        if (has_code && item_code != 0 && item_code != 200) {
+            reason = "denied";
+        } else if (trial) {
+            reason = "free_trial";
+        } else if (!url[0]) {
+            reason = "no_url";
+        } else {
+            granted = 1;
+            reason = "ok";
+        }
+    }
+    ne_jval *out = ne_jval_new(NE_JV_OBJ);
+    ne_jval_put(out, "requested", ne_jval_new_str(level));
+    ne_jval_put(out, "granted", ne_jval_new_bool(granted));
+    ne_jval_put(out, "reason", ne_jval_new_str(reason));
+    ne_jval_put(out, "code", ne_jval_new_num_d(has_code ? item_code : r->code));
+    ne_jval_put(out, "granted_br", ne_jval_new_num_d(br));
+    ne_jval_put(out, "granted_level", ne_jval_new_str(glevel));
+    ne_jval_free(root);
+    ne_resp_free(r);
+    print_marshal(out);
     return 0;
 }
 
@@ -653,6 +769,47 @@ static int cmd_account_name(void) {
     return 0;
 }
 
+/* account-info — account-level entitlement: vipType + login state + name */
+static int cmd_account_info(void) {
+    ne_resp *r = ne_user_account();
+    ne_jval *root = NULL;
+    if (!parse_root(r->body, &root)) {
+        ne_resp_free(r);
+        ne_jval *out = ne_jval_new(NE_JV_OBJ);
+        ne_jval_put(out, "vipType", ne_jval_new_num_d(0));
+        ne_jval_put(out, "name", ne_jval_new_str(""));
+        ne_jval_put(out, "login", ne_jval_new_bool(0));
+        print_marshal(out);
+        return 0;
+    }
+    ne_jval *prof = ne_jval_get(root, "profile");
+    int login = prof && ne_jval_type(prof) == NE_JV_OBJ;
+    long long vip = 0;
+    const char *name = NULL;
+    if (login) {
+        ne_jval *vt = ne_jval_get(prof, "vipType");
+        if (vt && ne_jval_type(vt) == NE_JV_NUM)
+            vip = (long long)ne_jval_num(vt);
+        ne_jval *n = ne_jval_get(prof, "nickname");
+        if (n && ne_jval_type(n) == NE_JV_STR) name = ne_jval_str(n);
+    }
+    if (!name || !*name) {
+        ne_jval *acc = ne_jval_get(root, "account");
+        if (acc && ne_jval_type(acc) == NE_JV_OBJ) {
+            ne_jval *n = ne_jval_get(acc, "userName");
+            if (n && ne_jval_type(n) == NE_JV_STR) name = ne_jval_str(n);
+        }
+    }
+    ne_jval *out = ne_jval_new(NE_JV_OBJ);
+    ne_jval_put(out, "vipType", ne_jval_new_num_d((double)vip));
+    ne_jval_put(out, "name", ne_jval_new_str(name && *name ? name : ""));
+    ne_jval_put(out, "login", ne_jval_new_bool(login));
+    ne_jval_free(root);
+    ne_resp_free(r);
+    print_marshal(out);
+    return 0;
+}
+
 /* ── write family (phase 6) — the {"code":%.0f,"body":%s} envelope ── */
 
 /* output() for CreateRequest-style (code, body) pairs — body spliced RAW,
@@ -810,6 +967,13 @@ int main(int argc, char **argv) {
         rc = cmd_playlist_tracks(argv[2]);
     } else if (strcmp(cmd, "account-name") == 0) {
         rc = cmd_account_name();
+    } else if (strcmp(cmd, "account-info") == 0) {
+        rc = cmd_account_info();
+    } else if (strcmp(cmd, "vip-info") == 0) {
+        rc = pass(ne_vip_info());
+    } else if (strcmp(cmd, "check-quality") == 0) {
+        if (argc < 4) die("usage: netease-cli check-quality <id> <level>");
+        rc = cmd_check_quality(argv[2], argv[3]);
     } else if (strcmp(cmd, "playlists") == 0) {
         rc = cmd_playlists();
     } else if (strcmp(cmd, "login-email") == 0) {

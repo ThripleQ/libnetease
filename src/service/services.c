@@ -273,6 +273,17 @@ ne_resp *ne_user_account(void) {
     return r;
 }
 
+/* ── vip_info (original apiservice — not in the Go package) ── */
+ne_resp *ne_vip_info(void) {
+    jmap *data = jmap_new();
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/music-vip-membership/full/vip/info",
+             ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
 /* ── like_list_service.go ──────────────────────────────── */
 ne_resp *ne_like_list(const char *uid) {
     jmap *data = jmap_new();
