@@ -9,6 +9,7 @@
 #include <direct.h>
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
 #else
 #include <sys/stat.h>
 #endif
@@ -692,6 +693,24 @@ int main(int argc, char **argv) {
      * the C shell stays byte-identical on Windows */
     _setmode(_fileno(stdout), _O_BINARY);
     _setmode(_fileno(stderr), _O_BINARY);
+    /* Go's os.Args are UTF-8 (it decodes GetCommandLineW); C's argv arrives
+     * in the system ANSI codepage (GBK on zh-CN), so any non-ASCII arg —
+     * e.g. "新名字" for playlist-rename — would be mangled and break the
+     * UTF-8 JSON/eapi we send upstream. Convert every arg to UTF-8 here. */
+    for (int i = 1; i < argc; i++) {
+        int wn = MultiByteToWideChar(CP_ACP, 0, argv[i], -1, NULL, 0);
+        if (wn <= 0) continue;
+        wchar_t *w = malloc((size_t)wn * sizeof(wchar_t));
+        if (!w) continue;
+        MultiByteToWideChar(CP_ACP, 0, argv[i], -1, w, wn);
+        int un = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+        char *u = malloc((size_t)un);
+        if (u) {
+            WideCharToMultiByte(CP_UTF8, 0, w, -1, u, un, NULL, NULL);
+            argv[i] = u;
+        }
+        free(w);
+    }
 #endif
 
     if (argc < 2) {
