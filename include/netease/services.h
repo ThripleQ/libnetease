@@ -63,8 +63,9 @@ ne_resp *ne_recommend_playlists(const char *limit);
 /* UserAccountService — weapi rewrite of /api/nuser/account/get */
 ne_resp *ne_user_account(void);
 
-/* VipInfoService — CallWeapi /weapi/music-vip-membership/full/vip/info
- * (Binaryify /vip/info, "获取 VIP 信息(app端)"). Not wrapped by the Go
+/* VipInfoService — CallWeapi /weapi/music-vip-membership/front/vip/info
+ * (Binaryify /vip/info, "获取 VIP 信息(app端)"; endpoint path pinned from
+ * Binaryify NeteaseCloudMusicApi module/vip_info.js). Not wrapped by the Go
  * go-musicfox/netease-music package; added here for account-level
  * entitlement checks (redVipLevel / redVipExpireTime / musicPackage). */
 ne_resp *ne_vip_info(void);

@@ -273,11 +273,13 @@ ne_resp *ne_user_account(void) {
     return r;
 }
 
-/* ── vip_info (original apiservice — not in the Go package) ── */
+/* ── vip_info (original apiservice — not in the Go package) ──
+ * Endpoint pinned from Binaryify NeteaseCloudMusicApi module/vip_info.js:
+ * POST /weapi/music-vip-membership/front/vip/info with an empty body. */
 ne_resp *ne_vip_info(void) {
     jmap *data = jmap_new();
     char url[640];
-    snprintf(url, sizeof url, "%s/weapi/music-vip-membership/full/vip/info",
+    snprintf(url, sizeof url, "%s/weapi/music-vip-membership/front/vip/info",
              ne_api_base());
     ne_resp *r = ne_create_weapi(url, data, NULL);
     jmap_free(data);
