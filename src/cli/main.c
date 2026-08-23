@@ -408,6 +408,27 @@ static int cmd_song_music_quality(const char *id) {
     return 0;
 }
 
+/* song-purchased [limit] [offset] — dump the purchased single-track list
+ * (api/single/mybought/song/list). The list itself is owned content. */
+static int cmd_song_purchased(const char *limit_in, const char *offset_in) {
+    ne_resp *r = ne_song_purchased(limit_in, offset_in);
+    if (r->err) {
+        char msg[256];
+        snprintf(msg, sizeof msg, "song purchased failed: err=%d", r->err);
+        ne_resp_free(r);
+        die(msg);
+    }
+    ne_jval *root = NULL;
+    if (!parse_root(r->body, &root)) {
+        ne_resp_free(r);
+        die("bad song purchased response");
+    }
+    ne_jval_put(root, "code", ne_jval_new_num_d(r->code));
+    ne_resp_free(r);
+    print_marshal(root);
+    return 0;
+}
+
 /* check-quality <id> <level> — single-level entitlement probe. Requests
  * EXACTLY the given level from player/url/v1 (no fallback, no quality
  * ladder) and reports the server's verdict verbatim: granted / free_trial /
@@ -954,6 +975,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "song-music-quality") == 0) {
         if (argc < 3) die("usage: netease-cli song-music-quality <id>");
         rc = cmd_song_music_quality(argv[2]);
+    } else if (strcmp(cmd, "song-purchased") == 0) {
+        rc = cmd_song_purchased(argc > 2 ? argv[2] : NULL,
+                                argc > 3 ? argv[3] : NULL);
     } else if (strcmp(cmd, "song-detail") == 0) {
         if (argc < 3) die("usage: netease-cli song-detail <ids>");
         rc = pass(ne_song_detail(argv[2]));

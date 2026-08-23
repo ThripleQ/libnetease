@@ -41,6 +41,11 @@ ne_resp *ne_song_download_url(const char *id, const char *level);
  * means that level has no file. Pinned from chaunsin/netease-cloud-music. */
 ne_resp *ne_song_music_quality(const char *id);
 
+/* SongPurchasedService — api/single/mybought/song/list {limit, offset}:
+ * the user's purchased single tracks. Endpoint from
+ * Binaryify/NeteaseCloudMusicApi song_purchased. */
+ne_resp *ne_song_purchased(const char *limit, const char *offset);
+
 /* SongDetailService — weapi/v3/song/detail, cookie os=pc;
  * ids_csv "1,2,3" → c=[{"id":"1"},..], ids=[1,2,3] */
 ne_resp *ne_song_detail(const char *ids_csv);

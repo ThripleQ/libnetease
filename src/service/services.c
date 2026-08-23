@@ -167,6 +167,25 @@ ne_resp *ne_song_music_quality(const char *id) {
     return r;
 }
 
+/* ── song_purchased (已购单曲列表) ──────────────────────────
+ * Endpoint from Binaryify/NeteaseCloudMusicApi song_purchased:
+ * POST /api/single/mybought/song/list with {limit, offset}. Returns the
+ * user's purchased single tracks (the list itself is owned; no per-item
+ * flag needed). */
+ne_resp *ne_song_purchased(const char *limit, const char *offset) {
+    if (!limit || !*limit) limit = "20";
+    if (!offset || !*offset) offset = "0";
+    jmap *data = jmap_new();
+    jmap_put(data, "limit", limit);
+    jmap_put(data, "offset", offset);
+    char url[640];
+    snprintf(url, sizeof url, "%s/api/single/mybought/song/list",
+             ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
 /* ── song_detail_service.go ────────────────────────────── */
 ne_resp *ne_song_detail(const char *ids_csv) {
     /* c: [{"id":".."},...] — one entry per comma piece, input order;
