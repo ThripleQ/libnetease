@@ -186,6 +186,38 @@ ne_resp *ne_song_purchased(const char *limit, const char *offset) {
     return r;
 }
 
+/* ── album_purchased (已购数字专辑列表) ─────────────────────
+ * Endpoint from Binaryify/NeteaseCloudMusicApi digitalAlbum_purchased:
+ * POST /api/digitalAlbum/purchased with {limit, offset, total}. Returns the
+ * user's purchased digital albums. */
+ne_resp *ne_album_purchased(const char *limit, const char *offset) {
+    if (!limit || !*limit) limit = "30";
+    if (!offset || !*offset) offset = "0";
+    jmap *data = jmap_new();
+    jmap_put(data, "limit", limit);
+    jmap_put(data, "offset", offset);
+    jmap_put(data, "total", "true");
+    char url[640];
+    snprintf(url, sizeof url, "%s/api/digitalAlbum/purchased",
+             ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* ── album_detail (专辑详情) ─────────────────────────────
+ * Endpoint from Binaryify/NeteaseCloudMusicApi album:
+ * POST /weapi/v1/album/{id}. Returns the album's tracks. */
+ne_resp *ne_album_detail(const char *id) {
+    jmap *data = jmap_new();
+    jmap_put(data, "id", id);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/v1/album/%s", ne_api_base(), id);
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
 /* ── song_detail_service.go ────────────────────────────── */
 ne_resp *ne_song_detail(const char *ids_csv) {
     /* c: [{"id":".."},...] — one entry per comma piece, input order;

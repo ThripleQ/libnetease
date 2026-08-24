@@ -46,6 +46,14 @@ ne_resp *ne_song_music_quality(const char *id);
  * Binaryify/NeteaseCloudMusicApi song_purchased. */
 ne_resp *ne_song_purchased(const char *limit, const char *offset);
 
+/* AlbumPurchasedService — api/digitalAlbum/purchased {limit, offset, total}:
+ * the user's purchased digital albums. Endpoint from
+ * Binaryify/NeteaseCloudMusicApi digitalAlbum_purchased. */
+ne_resp *ne_album_purchased(const char *limit, const char *offset);
+
+/* AlbumDetailService — weapi/v1/album/{id}: the album's tracks. */
+ne_resp *ne_album_detail(const char *id);
+
 /* SongDetailService — weapi/v3/song/detail, cookie os=pc;
  * ids_csv "1,2,3" → c=[{"id":"1"},..], ids=[1,2,3] */
 ne_resp *ne_song_detail(const char *ids_csv);
