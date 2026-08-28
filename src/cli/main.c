@@ -683,6 +683,9 @@ static int cmd_playlists(void) {
             ne_jval *sv = ne_jval_get(pm, "subscribed");
             if (sv && ne_jval_type(sv) == NE_JV_BOOL)
                 subscribed = ne_jval_bool(sv);
+            ne_jval *cov = ne_jval_get(pm, "coverImgUrl");
+            const char *cover =
+                (cov && ne_jval_type(cov) == NE_JV_STR) ? ne_jval_str(cov) : "";
             if (pid > 0) {
                 ne_jval *o = ne_jval_new(NE_JV_OBJ);
                 char idbuf[32];
@@ -690,6 +693,7 @@ static int cmd_playlists(void) {
                 ne_jval_put(o, "id", ne_jval_new_num(idbuf));
                 ne_jval_put(o, "name", ne_jval_new_str(name ? name : ""));
                 ne_jval_put(o, "subscribed", ne_jval_new_bool(subscribed));
+                ne_jval_put(o, "coverImgUrl", ne_jval_new_str(cover));
                 ne_jval_push(all, o);
             }
         }
@@ -703,6 +707,30 @@ static int cmd_playlists(void) {
     ne_jval *out = ne_jval_new(NE_JV_OBJ);
     ne_jval_put(out, "code", ne_jval_new_num_d(200));
     ne_jval_put(out, "playlists", all);
+    print_marshal(out);
+    return 0;
+}
+
+static int cmd_playlist_cover(const char *id) {
+    ne_resp *r = ne_playlist_detail(id, "0");
+    ne_jval *root = NULL;
+    if (!parse_root(r->body, &root)) {
+        output(r->body);
+        ne_resp_free(r);
+        return 0;
+    }
+    ne_jval *pl = ne_jval_get(root, "playlist");
+    const char *cover = "";
+    if (pl && ne_jval_type(pl) == NE_JV_OBJ) {
+        ne_jval *cov = ne_jval_get(pl, "coverImgUrl");
+        if (cov && ne_jval_type(cov) == NE_JV_STR && ne_jval_str(cov))
+            cover = ne_jval_str(cov);
+    }
+    ne_jval *out = ne_jval_new(NE_JV_OBJ);
+    ne_jval_put(out, "code", ne_jval_new_num_d(200));
+    ne_jval_put(out, "coverImgUrl", ne_jval_new_str(cover));
+    ne_jval_free(root);
+    ne_resp_free(r);
     print_marshal(out);
     return 0;
 }
@@ -1011,6 +1039,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "playlist") == 0) {
         if (argc < 3) die("usage: netease-cli playlist <id>");
         rc = pass(ne_playlist_detail(argv[2], "0"));
+    } else if (strcmp(cmd, "playlist-cover") == 0) {
+        if (argc < 3) die("usage: netease-cli playlist-cover <id>");
+        rc = cmd_playlist_cover(argv[2]);
     } else if (strcmp(cmd, "user-playlist") == 0) {
         if (argc < 3) die("usage: netease-cli user-playlist <uid>");
         rc = pass(ne_user_playlist(argv[2], NULL, NULL));
