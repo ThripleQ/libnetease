@@ -20,10 +20,15 @@ static const char *UA_PC =
 static ne_jar *g_jar = NULL;
 static char   *g_cookie_path = NULL;
 
-/* API base override — test hook only; unset in production the value is the
- * hard-coded https://music.163.com exactly like the Go build. */
+/* API base override. Priority: explicit ne_set_api_base() (highest), then the
+ * NE_API_BASE env fallback (test hook), then the production default. The env
+ * path is a convenience for CLI/test hosts; embedded hosts (Android, GUI) that
+ * cannot rely on the environment must call ne_set_api_base() up front. */
+static char *g_api_base = NULL;
+
 static const char *api_base(void) {
-    const char *b = getenv("NE_API_BASE");
+    const char *b = g_api_base;
+    if (!b || !*b) b = getenv("NE_API_BASE");
     if (b && *b) {
         static char base[512];
         snprintf(base, sizeof base, "%s", b);
@@ -36,6 +41,11 @@ static const char *api_base(void) {
 }
 
 const char *ne_api_base(void) { return api_base(); }
+
+void ne_set_api_base(const char *base) {
+    free(g_api_base);
+    g_api_base = (base && *base) ? ne_xstrdup(base) : NULL;
+}
 
 void ne_set_cookie_file(const char *path) {
     free(g_cookie_path);
@@ -57,10 +67,12 @@ void ne_jar_reload(void) {
     }
 }
 
-static void jar_sync_from_response(void) {
-    const char *sc = ne_http_last_setcookies();
-    if (!sc || !*sc) return;
-    char *copy = ne_xstrdup(sc);
+/* Merge Set-Cookie lines delivered by the transport directly from the
+ * response object — no thread-local back-channel (see the thread contract
+ * note in request.h). */
+static void jar_sync_set_cookies(const char *set_cookies) {
+    if (!set_cookies || !*set_cookies) return;
+    char *copy = ne_xstrdup(set_cookies);
     char *save = NULL;
     for (char *line = strtok_r(copy, "\n", &save); line;
          line = strtok_r(NULL, "\n", &save))
@@ -106,7 +118,7 @@ static ne_resp *finish(ne_http_resp *h) {
         r->body = ne_xstrdup(h && h->err ? h->err : "transport error");
         r->err = 1;
     } else {
-        jar_sync_from_response();
+        jar_sync_set_cookies(h ? h->set_cookies : NULL);
         r->body = ne_xstrdup(h->body ? h->body : "");
         r->body_len = h->body_len;
         r->code = parse_code(r->body);

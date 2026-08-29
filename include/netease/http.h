@@ -22,7 +22,10 @@ void ne_http_resp_free(ne_http_resp *r);
 
 /* A transport implements a single "do a request, get a response" primitive.
  * method is "POST" or "GET" (body/content_type only used for POST);
- * cookie_header may be NULL. Always returns a malloc'd resp, never NULL. */
+ * cookie_header may be NULL. Always returns a malloc'd resp, never NULL.
+ * Set-Cookie response headers MUST be captured by the transport into
+ * resp->set_cookies as "name=value\n" lines — the request layer consumes them
+ * directly from the response object (no thread-local back-channel). */
 typedef ne_http_resp *(*ne_transport_req_fn)(
     const char *url, const char *method,
     const char *body, const char *content_type,
@@ -50,11 +53,6 @@ ne_http_resp *ne_http_post(const char *url,
 ne_http_resp *ne_http_get(const char *url,
                           const char *cookie_header,
                           const char *user_agent);
-
-/* concatenated "name=value\n" lines from Set-Cookie response headers of the
- * last ne_http_* call (single-threaded CLI usage). Sourced from
- * resp->set_cookies, independent of which transport produced it. */
-const char *ne_http_last_setcookies(void);
 
 /* urlencoded "a=1&b=2" builder over (key,value) pairs (transport-independent) */
 char *ne_http_form_encode(const char *const *kv, size_t n_pairs);

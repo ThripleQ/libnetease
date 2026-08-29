@@ -3,8 +3,17 @@
 #include <stddef.h>
 #include "netease/jmap.h"
 
-/* Request kernel — mirrors util.CallWeapi / util.CreateRequest (v1.6.0).
- * One global jar per process, persisted by the CLI on exit. */
+/* Request kernel -- mirrors util.CallWeapi / util.CreateRequest (v1.6.0).
+ * One global jar per process, persisted by the CLI on exit.
+ *
+ * THREAD CONTRACT: this layer is process-global, single-threaded by design
+ * (one active caller at a time): the global jar (ne_global_jar and the
+ * ne_jar_ accessors), the optional cookie file, the installed API base and
+ * the request transport are all shared, unsynchronized state. A multi-threaded
+ * host (e.g. Android via JNI) MUST NOT issue concurrent request-kernel calls
+ * against the same jar; serialize them (single dispatcher thread/queue, or an
+ * external mutex guarding every call). This matches the Go process's
+ * single-threaded operation. */
 
 typedef struct {
     double code;     /* API business code ("code" field), 200 fallback,
@@ -25,11 +34,14 @@ void ne_jar_reload(void);
 struct ne_jar;
 struct ne_jar *ne_global_jar(void);
 
-/* API base URL — "https://music.163.com" or the NE_API_BASE env override
- * (test hook; unset in production). */
+/* API base URL. Default "https://music.163.com". Priority: explicit
+ * ne_set_api_base() (highest) -> NE_API_BASE env (CLI/test hook) -> default.
+ * Embedded hosts (Android, GUI) that cannot rely on the environment should
+ * call ne_set_api_base() at startup. */
 const char *ne_api_base(void);
+void ne_set_api_base(const char *base);
 
-/* util.CallWeapi — POST <api> with ApiParamsEncode(data).
+/* util.CallWeapi -- POST <api> with ApiParamsEncode(data).
  * UA = pc, Referer set, cookies from global jar. */
 ne_resp *ne_call_weapi(const char *api, const jmap *data);
 

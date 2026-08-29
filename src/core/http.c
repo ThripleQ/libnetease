@@ -4,11 +4,9 @@
  * app installs one via ne_http_set_transport() — typically an OkHttp-backed
  * transport reached over JNI. Either way the request layer is untouched.
  *
- * Split:
- *   - curl_request(): the libcurl-backed transport (fills resp->set_cookies)
- *   - ne_http_post/get(): thin conveniences that dispatch to the installed
- *     transport and sink Set-Cookie into the thread-local last-setcookies
- *     buffer (ne_http_last_setcookies). */
+ * Set-Cookie handling: each transport captures Set-Cookie response headers
+ * into resp->set_cookies; the request layer reads them straight off the
+ * response object, so there is no shared/global cookie back-channel here. */
 #include "netease/http.h"
 #include "netease/util.h"
 #include <stdio.h>
@@ -148,10 +146,6 @@ void ne_http_resp_free(ne_http_resp *r) {
     free(r);
 }
 
-NE_THREAD_LOCAL char *g_last_setcookies;
-
-const char *ne_http_last_setcookies(void) { return g_last_setcookies; }
-
 static ne_http_resp *do_request(const char *url, const char *method,
                                 const char *body, const char *content_type,
                                 const char *cookie_header,
@@ -167,14 +161,7 @@ static ne_http_resp *do_request(const char *url, const char *method,
         r->err = ne_xstrdup("no http transport installed");
         return r;
     }
-    ne_http_resp *r = t->request(url, method, body, content_type,
-                                 cookie_header, user_agent);
-    /* sink set-cookies into the thread-local buffer; the request layer
-     * re-fetches via ne_http_last_setcookies (single-threaded CLI) */
-    free(g_last_setcookies);
-    g_last_setcookies = (r && r->set_cookies) ? ne_xstrdup(r->set_cookies)
-                                              : ne_xstrdup("");
-    return r;
+    return t->request(url, method, body, content_type, cookie_header, user_agent);
 }
 
 ne_http_resp *ne_http_post(const char *url, const char *form_body,
