@@ -1,9 +1,20 @@
-/* libcurl wrapper — request.go's transport equivalent. */
+/* Transport-agnostic HTTP layer. The default transport is libcurl,
+ * installed here; a replacement can be installed at runtime via
+ * ne_http_set_transport() (e.g. an OkHttp-backed one on Android), so the
+ * library itself never hard-depends on a given network/TLS stack.
+ *
+ * Split:
+ *   - curl_request(): the libcurl-backed transport (fills resp->set_cookies)
+ *   - ne_http_post/get(): thin conveniences that dispatch to the installed
+ *     transport and sink Set-Cookie into the thread-local last-setcookies
+ *     buffer for the request layer (ne_http_last_setcookies). */
 #include "netease/http.h"
 #include "netease/util.h"
 #include <curl/curl.h>
 #include <stdio.h>
 #include <string.h>
+
+/* ── libcurl transport (default) ────────────────────────── */
 
 struct body_buf { char *p; size_t len, cap; };
 
@@ -22,55 +33,40 @@ static size_t write_cb(char *ptr, size_t size, size_t nmemb, void *ud) {
     return size * nmemb;
 }
 
-/* parse Set-Cookie headers from the raw header block into jar-form lines;
- * the request layer feeds these to ne_jar via ne_jar_merge_cookie_str on
- * each "Set-Cookie:" header line. Handled by the caller through the
- * header callback below (kept simple: full header text returned in
- * resp->body only; cookies are extracted in http_post_common). */
-struct resp_meta {
-    struct body_buf body;
-    struct body_buf setcookies;   /* concatenated "name=value; ...\n" */
-};
-
+/* Collect Set-Cookie headers into concatenated "name=value; ...\n" lines so
+ * the transport can hand them back via resp->set_cookies. */
 static size_t header_cb(char *ptr, size_t size, size_t nmemb, void *ud) {
     size_t n = size * nmemb;
-    struct resp_meta *m = ud;
+    struct body_buf *setcookies = (struct body_buf *)ud;
     if (n > 12 && strncasecmp(ptr, "Set-Cookie:", 11) == 0) {
         const char *v = ptr + 11;
         size_t vn = n - 11;
         while (vn > 0 && (*v == ' ' || *v == '\t')) { v++; vn--; }
         /* strip trailing \r\n */
         while (vn > 0 && (v[vn - 1] == '\n' || v[vn - 1] == '\r')) vn--;
-        body_append(&m->setcookies, v, vn);
-        body_append(&m->setcookies, "\n", 1);
+        body_append(setcookies, v, vn);
+        body_append(setcookies, "\n", 1);
     }
     return n;
 }
 
-void ne_http_resp_free(ne_http_resp *r) {
-    if (!r) return;
-    free(r->body);
-    free(r->err);
-    free(r);
-}
-
-static ne_http_resp *do_request(const char *url, const char *post_body,
-                                const char *cookie_header,
-                                const char *user_agent,
-                                const char *content_type) {
+static ne_http_resp *curl_request(const char *url, const char *method,
+                                  const char *body, const char *content_type,
+                                  const char *cookie_header,
+                                  const char *user_agent) {
     CURL *curl = curl_easy_init();
     if (!curl) return NULL;
 
-    struct resp_meta m = {{0}, {0}};
+    struct body_buf body_b = {0}, setcookies = {0};
     ne_http_resp *r = ne_xmalloc(sizeof(ne_http_resp));
     memset(r, 0, sizeof *r);
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     if (getenv("NE_DEBUG_HTTP")) curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &m.body);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body_b);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_cb);
-    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &m);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &setcookies);
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");   /* zlib/gzip auto */
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
@@ -83,12 +79,12 @@ static ne_http_resp *do_request(const char *url, const char *post_body,
         snprintf(ua_hdr, sizeof ua_hdr, "User-Agent: %s", user_agent);
         hdrs = curl_slist_append(hdrs, ua_hdr);
     }
-    if (post_body) {
+    if (body && strcmp(method, "POST") == 0) {
         char ct_hdr[256];
         snprintf(ct_hdr, sizeof ct_hdr, "Content-Type: %s",
                  content_type ? content_type : "application/x-www-form-urlencoded");
         hdrs = curl_slist_append(hdrs, ct_hdr);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_body);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     }
     /* Go requests.NewRequest sets Referer unconditionally (CallWeapi path);
      * CreateRequest sets it for music.163.com — netease URLs always are,
@@ -110,36 +106,95 @@ static ne_http_resp *do_request(const char *url, const char *post_body,
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
         r->status = code;
     }
-    r->body = m.body.p ? m.body.p : ne_xstrdup("");
-    r->body_len = m.body.len;
-
-    /* expose set-cookies through a hidden channel: caller re-fetches via
-     * ne_http_last_setcookies (single-threaded CLI, acceptable) */
-    {
-        extern NE_THREAD_LOCAL char *g_last_setcookies;
-        free(g_last_setcookies);
-        g_last_setcookies = m.setcookies.p ? m.setcookies.p : ne_xstrdup("");
-    }
+    r->body = body_b.p ? body_b.p : ne_xstrdup("");
+    r->body_len = body_b.len;
+    r->set_cookies = setcookies.p ? setcookies.p : NULL;
 
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     return r;
 }
 
-/* thread-local set-cookie sink (single-threaded CLI usage) */
+static const ne_http_transport g_curl_transport = { curl_request };
+
+/* ── installed-transport dispatch + thread-local set-cookie sink ── */
+
+static const ne_http_transport *g_transport = &g_curl_transport;
+
+void ne_http_set_transport(const ne_http_transport *t) {
+    g_transport = t ? t : &g_curl_transport;
+}
+const ne_http_transport *ne_http_get_transport(void) { return g_transport; }
+
+void ne_http_resp_free(ne_http_resp *r) {
+    if (!r) return;
+    free(r->body);
+    free(r->err);
+    free(r->set_cookies);
+    free(r);
+}
+
 NE_THREAD_LOCAL char *g_last_setcookies;
 
 const char *ne_http_last_setcookies(void) { return g_last_setcookies; }
 
+static ne_http_resp *do_request(const char *url, const char *method,
+                                const char *body, const char *content_type,
+                                const char *cookie_header,
+                                const char *user_agent) {
+    const ne_http_transport *t = g_transport;
+    if (!t || !t->request) {
+        /* no transport installed (library built without curl and none
+         * injected) — fail cleanly instead of crashing */
+        ne_http_resp *r = ne_xmalloc(sizeof(ne_http_resp));
+        memset(r, 0, sizeof *r);
+        r->status = 0;
+        r->body = ne_xstrdup("");
+        r->err = ne_xstrdup("no http transport installed");
+        return r;
+    }
+    ne_http_resp *r = t->request(url, method, body, content_type,
+                                 cookie_header, user_agent);
+    /* sink set-cookies into the thread-local buffer; the request layer
+     * re-fetches via ne_http_last_setcookies (single-threaded CLI) */
+    free(g_last_setcookies);
+    g_last_setcookies = (r && r->set_cookies) ? ne_xstrdup(r->set_cookies)
+                                              : ne_xstrdup("");
+    return r;
+}
+
 ne_http_resp *ne_http_post(const char *url, const char *form_body,
                            const char *cookie_header, const char *user_agent,
                            const char *content_type) {
-    return do_request(url, form_body, cookie_header, user_agent, content_type);
+    return do_request(url, "POST", form_body, content_type,
+                      cookie_header, user_agent);
 }
 
 ne_http_resp *ne_http_get(const char *url, const char *cookie_header,
                           const char *user_agent) {
-    return do_request(url, NULL, cookie_header, user_agent, NULL);
+    return do_request(url, "GET", NULL, NULL, cookie_header, user_agent);
+}
+
+/* ── urlencoding (transport-independent; was curl_easy_escape) ── */
+
+static int url_unreserved(unsigned char ch) {
+    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+           (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
+           ch == '.' || ch == '~';
+}
+
+static void url_append_escaped(char *dst, size_t *len,
+                               const unsigned char *s) {
+    static const char hex[] = "0123456789ABCDEF";
+    for (; *s; s++) {
+        if (url_unreserved(*s)) {
+            dst[(*len)++] = (char)*s;
+        } else {
+            dst[(*len)++] = '%';
+            dst[(*len)++] = hex[*s >> 4];
+            dst[(*len)++] = hex[*s & 0xF];
+        }
+    }
 }
 
 char *ne_http_form_encode(const char *const *kv, size_t n_pairs) {
@@ -147,13 +202,15 @@ char *ne_http_form_encode(const char *const *kv, size_t n_pairs) {
     char *out = ne_xmalloc(cap);
     out[0] = '\0';
     for (size_t i = 0; i < n_pairs; i++) {
-        char *ek = curl_easy_escape(NULL, kv[2 * i], 0);
-        char *ev = curl_easy_escape(NULL, kv[2 * i + 1], 0);
-        if (!ek || !ev) { free(ek); free(ev); free(out); return NULL; }
-        size_t add = strlen(ek) + strlen(ev) + 2 + (len ? 1 : 0);
-        while (len + add + 1 > cap) { cap *= 2; out = ne_xrealloc(out, cap); }
-        len += (size_t)snprintf(out + len, cap - len, "%s%s=%s", len ? "&" : "", ek, ev);
-        curl_free(ek); curl_free(ev);
+        const char *k = kv[2 * i], *v = kv[2 * i + 1];
+        /* worst case: 3x each byte of key/value, '=', and '&' or '\0' */
+        size_t need = (strlen(k) + strlen(v)) * 3 + 2 + (len ? 1 : 0);
+        while (len + need + 1 > cap) { cap *= 2; out = ne_xrealloc(out, cap); }
+        if (len) out[len++] = '&';
+        url_append_escaped(out, &len, (const unsigned char *)k);
+        out[len++] = '=';
+        url_append_escaped(out, &len, (const unsigned char *)v);
+        out[len] = '\0';
     }
     return out;
 }
