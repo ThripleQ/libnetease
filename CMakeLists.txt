@@ -15,7 +15,18 @@ else()
 endif()
 
 # ── libnetease: static library ──────────────────────────
-find_package(CURL REQUIRED)
+# The default HTTP transport is libcurl, but it is OPTIONAL: a platform
+# without curl (e.g. the Android NDK) builds the library without it and the
+# host app installs another transport at runtime via ne_http_set_transport().
+# CMake option to force curl off: -DNE_USE_CURL=OFF
+option(NE_USE_CURL "Build with the default libcurl HTTP transport" ON)
+set(NE_HAVE_CURL 0)
+if(NE_USE_CURL)
+  find_package(CURL)
+  if(CURL_FOUND)
+    set(NE_HAVE_CURL 1)
+  endif()
+endif()
 # zlib optional: used for compressed PNG IDAT; without it qrenc falls back to
 # stored (uncompressed) deflate — the PNG stays valid either way.
 find_package(ZLIB)
@@ -44,7 +55,10 @@ add_library(netease STATIC
   src/service/services.c
 )
 target_include_directories(netease PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(netease PUBLIC CURL::libcurl)
+if(NE_HAVE_CURL)
+  target_compile_definitions(netease PRIVATE NE_HAVE_CURL)
+  target_link_libraries(netease PUBLIC CURL::libcurl)
+endif()
 if(ZLIB_FOUND)
   target_compile_definitions(netease PRIVATE NE_HAVE_ZLIB)
   target_link_libraries(netease PUBLIC ZLIB::ZLIB)

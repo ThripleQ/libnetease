@@ -1,20 +1,25 @@
-/* Transport-agnostic HTTP layer. The default transport is libcurl,
- * installed here; a replacement can be installed at runtime via
- * ne_http_set_transport() (e.g. an OkHttp-backed one on Android), so the
- * library itself never hard-depends on a given network/TLS stack.
+/* Transport-agnostic HTTP layer. The default transport is libcurl, compiled
+ * in only when NE_HAVE_CURL is set (the desktop builds). On a platform
+ * without curl (e.g. Android NDK) no default transport is present; the host
+ * app installs one via ne_http_set_transport() — typically an OkHttp-backed
+ * transport reached over JNI. Either way the request layer is untouched.
  *
  * Split:
  *   - curl_request(): the libcurl-backed transport (fills resp->set_cookies)
  *   - ne_http_post/get(): thin conveniences that dispatch to the installed
  *     transport and sink Set-Cookie into the thread-local last-setcookies
- *     buffer for the request layer (ne_http_last_setcookies). */
+ *     buffer (ne_http_last_setcookies). */
 #include "netease/http.h"
 #include "netease/util.h"
-#include <curl/curl.h>
 #include <stdio.h>
 #include <string.h>
 
-/* ── libcurl transport (default) ────────────────────────── */
+#ifdef NE_HAVE_CURL
+#include <curl/curl.h>
+#endif
+
+/* ── default libcurl transport ────────────────────────── */
+#ifdef NE_HAVE_CURL
 
 struct body_buf { char *p; size_t len, cap; };
 
@@ -116,15 +121,24 @@ static ne_http_resp *curl_request(const char *url, const char *method,
 }
 
 static const ne_http_transport g_curl_transport = { curl_request };
+#endif /* NE_HAVE_CURL */
 
 /* ── installed-transport dispatch + thread-local set-cookie sink ── */
 
-static const ne_http_transport *g_transport = &g_curl_transport;
+static const ne_http_transport *g_transport = NULL;   /* NULL → default */
 
-void ne_http_set_transport(const ne_http_transport *t) {
-    g_transport = t ? t : &g_curl_transport;
+static const ne_http_transport *g_default_transport(void) {
+#ifdef NE_HAVE_CURL
+    return &g_curl_transport;
+#else
+    return NULL;
+#endif
 }
-const ne_http_transport *ne_http_get_transport(void) { return g_transport; }
+
+void ne_http_set_transport(const ne_http_transport *t) { g_transport = t; }
+const ne_http_transport *ne_http_get_transport(void) {
+    return g_transport ? g_transport : g_default_transport();
+}
 
 void ne_http_resp_free(ne_http_resp *r) {
     if (!r) return;
@@ -142,10 +156,10 @@ static ne_http_resp *do_request(const char *url, const char *method,
                                 const char *body, const char *content_type,
                                 const char *cookie_header,
                                 const char *user_agent) {
-    const ne_http_transport *t = g_transport;
+    const ne_http_transport *t = g_transport ? g_transport : g_default_transport();
     if (!t || !t->request) {
-        /* no transport installed (library built without curl and none
-         * injected) — fail cleanly instead of crashing */
+        /* no transport (built without curl and none injected) — fail cleanly
+         * instead of crashing */
         ne_http_resp *r = ne_xmalloc(sizeof(ne_http_resp));
         memset(r, 0, sizeof *r);
         r->status = 0;
