@@ -40,6 +40,9 @@ add_library(netease STATIC
   src/vendor/rsa.c
   # vendor: go-qrcode port (Medium level)
   src/vendor/qrenc.c
+  # data: large read-only tables, compiled independently from code so the
+  # ~1.3 MB device-id blob is emitted as pure .rodata
+  src/data/deviceids_data.c
   # core
   src/core/util.c
   src/core/rand.c
@@ -65,7 +68,15 @@ if(ZLIB_FOUND)
 endif()
 
 # ── netease-cli: drop-in replacement shell (same name & protocol as the Go build)
-add_executable(netease-cli src/cli/main.c)
+add_executable(netease-cli
+  src/cli/main.c          # dispatcher + main-only helpers
+  src/cli/cli_shared.c    # shared process/JSON helpers
+  src/cli/cmd_qr.c        # qr-key / qr-check
+  src/cli/cmd_song.c      # check-music / song-url / quality / purchased
+  src/cli/cmd_album.c     # album-purchased / album
+  src/cli/cmd_user.c      # liked / playlists / lyric / account
+  src/cli/cmd_write.c     # like / subscribe / track
+)
 target_link_libraries(netease-cli PRIVATE netease)
 
 # ── tests ───────────────────────────────────────────────
