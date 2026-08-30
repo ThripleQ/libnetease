@@ -341,7 +341,9 @@ ne_resp *ne_recommend_playlists(const char *limit) {
 ne_resp *ne_user_account(void) {
     jmap *data = jmap_new();
     char url[640];
-    snprintf(url, sizeof url, "%s/api/nuser/account/get", ne_api_base());
+    /* 2026 网易已迁移: /api/w/nuser/account/get (api-enhanced login_status.js
+     * 现行路径); 旧路径 /api/nuser/account/get 会重定向到 HTML 登录页 */
+    snprintf(url, sizeof url, "%s/api/w/nuser/account/get", ne_api_base());
     ne_resp *r = ne_create_weapi(url, data, NULL);
     jmap_free(data);
     return r;

@@ -161,7 +161,7 @@ def dispatch(state, conn, url, cookie):
         return respond_raw(conn, RECENT)
     if url == "/weapi/music-vip-membership/front/vip/info":
         return respond_raw(conn, VIP_INFO)
-    if url == "/weapi/nuser/account/get":
+    if url == "/weapi/w/nuser/account/get":
         if "GARBAGE" in cookie:   # HTML instead of JSON
             body = b"<html>not json</html>"
             conn.send_response(200)
