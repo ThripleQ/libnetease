@@ -58,15 +58,6 @@ static int http_no_keepalive(void) {
     const char *e = getenv("NE_NO_KEEPALIVE");
     return e && *e && *e != '0';
 }
-static int http_use_http2(void) {
-    const char *e = getenv("NE_HTTP2");
-    return e && *e && *e != '0';
-}
-static int http_browser_headers(void) {
-    const char *e = getenv("NE_BROWSER_HEADERS");
-    return e && *e && *e != '0';
-}
-
 static void http_pace(void) {
     int base = http_rate_base(), jit = http_rate_jitter();
     if (base <= 0 && jit <= 0) return;
@@ -77,6 +68,16 @@ static void http_pace(void) {
 
 /* ── default libcurl transport ────────────────────────── */
 #ifdef NE_HAVE_CURL
+/* curl-only toggles: unused in no-curl builds (Android/JNI), so they live
+ * inside this block to keep -Wunused-function clean. */
+static int http_use_http2(void) {
+    const char *e = getenv("NE_HTTP2");
+    return e && *e && *e != '0';
+}
+static int http_browser_headers(void) {
+    const char *e = getenv("NE_BROWSER_HEADERS");
+    return e && *e && *e != '0';
+}
 
 struct body_buf { char *p; size_t len, cap; };
 
