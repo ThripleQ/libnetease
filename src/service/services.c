@@ -497,9 +497,12 @@ ne_resp *ne_login_cellphone(const char *phone, const char *password) {
     jmap_put(data, "type", "1");
     jmap_put(data, "https", "true");
     jmap_put(data, "remember", "true");
+    jmap_put(data, "secureCaptcha", "");
 
     char url[640];
-    snprintf(url, sizeof url, "%s/weapi/login/cellphone", ne_api_base());
+    /* /api/w/login/cellphone 经 weapi rewrite 后为 /weapi/w/login/cellphone
+     * (旧路径 /weapi/login/cellphone 已被网易下线) */
+    snprintf(url, sizeof url, "%s/api/w/login/cellphone", ne_api_base());
     ne_resp *r = ne_create_weapi(url, data, NULL);
     jmap_free(data);
     free(pw);
@@ -513,10 +516,15 @@ ne_resp *ne_send_captcha(const char *phone, const char *countrycode) {
     jmap *data = jmap_new();
     jmap_put(data, "cellphone", phone);
     jmap_put(data, "ctcode", countrycode);
+    /* 网易 2025+ 要求登录场景密钥, 缺失则验证码接口静默拒绝
+     * (api-enhanced module/captcha_sent.js 现行字段) */
+    jmap_put(data, "secrete", "music_middleuser_pclogin");
 
     static const char *extras[] = { "os", "pc", NULL };
     char url[640];
-    snprintf(url, sizeof url, "%s/weapi/captcha/sent", ne_api_base());
+    /* /api/sms/captcha/sent 经 weapi rewrite 后为 /weapi/sms/captcha/sent
+     * (旧路径 /weapi/captcha/sent 已被网易下线) */
+    snprintf(url, sizeof url, "%s/api/sms/captcha/sent", ne_api_base());
     ne_resp *r = ne_create_weapi(url, data, extras);
     jmap_free(data);
     return r;
@@ -536,9 +544,10 @@ ne_resp *ne_login_cellphone_captcha(const char *phone, const char *captcha,
     jmap_put(data, "type", "1");
     jmap_put(data, "https", "true");
     jmap_put(data, "remember", "true");
+    jmap_put(data, "secureCaptcha", "");
 
     char url[640];
-    snprintf(url, sizeof url, "%s/weapi/login/cellphone", ne_api_base());
+    snprintf(url, sizeof url, "%s/api/w/login/cellphone", ne_api_base());
     ne_resp *r = ne_create_weapi(url, data, NULL);
     jmap_free(data);
     return r;

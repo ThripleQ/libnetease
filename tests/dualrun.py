@@ -201,7 +201,7 @@ def dispatch(state, conn, url, cookie):
         return respond_raw(conn, OK)
     if url in ("/api/login", "/api/login/", "/weapi/login", "/weapi/login/"):
         return respond_raw(conn, LOGIN_EMAIL)
-    if url == "/weapi/login/cellphone":
+    if url == "/weapi/w/login/cellphone":
         return respond_raw(conn, LOGIN_CELL)
     if url == "/weapi/login/token/refresh":
         return respond_raw(conn, OK)
