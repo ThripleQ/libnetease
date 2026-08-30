@@ -506,6 +506,44 @@ ne_resp *ne_login_cellphone(const char *phone, const char *password) {
     return r;
 }
 
+/* send_captcha_service.go (Binaryify /captcha/sent) — weapi {cellphone, ctcode}.
+ * Sends the SMS login code; rate-limited per day, avoid spamming it. */
+ne_resp *ne_send_captcha(const char *phone, const char *countrycode) {
+    if (!countrycode || !*countrycode) countrycode = "86";
+    jmap *data = jmap_new();
+    jmap_put(data, "cellphone", phone);
+    jmap_put(data, "ctcode", countrycode);
+
+    static const char *extras[] = { "os", "pc", NULL };
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/captcha/sent", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, extras);
+    jmap_free(data);
+    return r;
+}
+
+/* login_cellphone captcha mode (Binaryify) — /weapi/login/cellphone with
+ * the SMS code instead of the password. */
+ne_resp *ne_login_cellphone_captcha(const char *phone, const char *captcha,
+                                    const char *countrycode) {
+    if (!countrycode || !*countrycode) countrycode = "86";
+    jmap *data = jmap_new();
+    jmap_put(data, "phone", phone);
+    jmap_put(data, "countrycode", countrycode);
+    jmap_put(data, "captcha", captcha);
+    jmap_put(data, "csrf_token", "");
+    jmap_put(data, "rememberLogin", "true");
+    jmap_put(data, "type", "1");
+    jmap_put(data, "https", "true");
+    jmap_put(data, "remember", "true");
+
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/login/cellphone", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
 /* login_refresh_service.go — ApplyRequestStrategy + csrf, CallWeapi */
 ne_resp *ne_login_refresh(void) {
     ne_apply_request_strategy();

@@ -127,6 +127,17 @@ ne_resp *ne_login_email(const char *email, const char *password);
  * type=1, https=true, remember=true} */
 ne_resp *ne_login_cellphone(const char *phone, const char *password);
 
+/* SendCaptchaService — weapi/captcha/sent {cellphone, ctcode}: send the SMS
+ * login code (prerequisite of captcha login). Endpoint from Binaryify
+ * /captcha/sent; no Go v1.6.0 counterpart (added for the SMS login flow). */
+ne_resp *ne_send_captcha(const char *phone, const char *countrycode);
+
+/* LoginCellphoneService captcha mode — /weapi/login/cellphone with
+ * {phone, countrycode, captcha, rememberLogin, type, https, remember,
+ * csrf_token}; logs in with the SMS code instead of the password. */
+ne_resp *ne_login_cellphone_captcha(const char *phone, const char *captcha,
+                                    const char *countrycode);
+
 /* LoginRefreshService — ApplyRequestStrategy + csrf from jar, CallWeapi
  * /weapi/login/token/refresh */
 ne_resp *ne_login_refresh(void);
