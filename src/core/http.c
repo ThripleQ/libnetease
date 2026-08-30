@@ -39,10 +39,6 @@ void ne_http_set_rate_limit(int base_ms, int jitter_ms) {
 }
 void ne_http_set_no_keepalive(int on) { g_no_keepalive = on ? 1 : 0; }
 
-static const char *http_real_ip(void) {
-    if (g_real_ip_set) return g_real_ip;
-    return getenv("NE_REAL_IP");
-}
 static int http_rate_base(void) {
     if (g_rate_base >= 0) return g_rate_base;
     const char *e = getenv("NE_RATE_LIMIT_MS");
@@ -53,11 +49,7 @@ static int http_rate_jitter(void) {
     const char *e = getenv("NE_RATE_LIMIT_JITTER_MS");
     return e ? atoi(e) : 0;
 }
-static int http_no_keepalive(void) {
-    if (g_no_keepalive >= 0) return g_no_keepalive;
-    const char *e = getenv("NE_NO_KEEPALIVE");
-    return e && *e && *e != '0';
-}
+
 static void http_pace(void) {
     int base = http_rate_base(), jit = http_rate_jitter();
     if (base <= 0 && jit <= 0) return;
@@ -70,6 +62,15 @@ static void http_pace(void) {
 #ifdef NE_HAVE_CURL
 /* curl-only toggles: unused in no-curl builds (Android/JNI), so they live
  * inside this block to keep -Wunused-function clean. */
+static const char *http_real_ip(void) {
+    if (g_real_ip_set) return g_real_ip;
+    return getenv("NE_REAL_IP");
+}
+static int http_no_keepalive(void) {
+    if (g_no_keepalive >= 0) return g_no_keepalive;
+    const char *e = getenv("NE_NO_KEEPALIVE");
+    return e && *e && *e != '0';
+}
 static int http_use_http2(void) {
     const char *e = getenv("NE_HTTP2");
     return e && *e && *e != '0';
