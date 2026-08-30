@@ -538,8 +538,8 @@ def build_cases(stub):
                 '{"ar":[{"name":"王五"}],"id":333,"name":"歌C"}]}}\n')
     case("playlists", ["playlists"],
          stdout='{"code":200,"playlists":['
-                '{"id":777,"name":"我的红心","subscribed":false},'
-                '{"id":888,"name":"收藏\\u0026分享","subscribed":true}]}\n')
+                '{"coverImgUrl":"","id":777,"name":"我的红心","subscribed":false},'
+                '{"coverImgUrl":"","id":888,"name":"收藏\\u0026分享","subscribed":true}]}\n')
     case("playlist-tracks", ["playlist-tracks", "777"],
          stdout='{"code":200,"result":{"songs":['
                 '{"id":111,"name":"歌\\u0026A"},'

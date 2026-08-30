@@ -52,6 +52,7 @@ add_library(netease STATIC
   src/core/crypto.c
   src/core/http.c
   src/core/cookiejar.c
+  src/core/risk.c
   src/core/request.c
   # services
   src/service/qr.c

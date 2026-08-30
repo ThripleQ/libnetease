@@ -7,15 +7,40 @@
 #include "netease/http.h"
 #include "netease/jval.h"
 #include "netease/rand.h"
+#include "netease/risk.h"
 #include "netease/util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* chooseUserAgent("pc") from request.go */
-static const char *UA_PC =
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0";
+/* chooseUserAgent("pc") from request.go — 宏而非指针, 供 UA_PC_POOL
+ * 做常量初始化(C11 要求数组初值必须是常量表达式) */
+#define UA_PC \
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " \
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0"
+
+/* UA 轮换池(仅 NE_UA_ROTATE=1 时启用; 默认仍用 UA_PC 保持字节级兼容).
+ * 全部为 PC 端 Web UA, 与 os=pc cookie 语义一致. */
+static const char *UA_PC_POOL[] = {
+    UA_PC,
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    NULL
+};
+
+static const char *choose_ua(void) {
+    if (!getenv("NE_UA_ROTATE")) return UA_PC;
+    static unsigned seq = 0;
+    size_t n = 0;
+    while (UA_PC_POOL[n]) n++;
+    unsigned pick = (seq++ + (unsigned)ne_rand_below(1000)) % (unsigned)n;
+    return UA_PC_POOL[pick];
+}
 
 static ne_jar *g_jar = NULL;
 static char   *g_cookie_path = NULL;
@@ -113,6 +138,7 @@ static double parse_code(const char *body) {
 static ne_resp *finish(ne_http_resp *h) {
     ne_resp *r = ne_xmalloc(sizeof(ne_resp));
     memset(r, 0, sizeof *r);
+    r->http_status = h ? h->status : 0;
     if (!h || h->status == 0 || h->err) {
         r->code = 520;
         r->body = ne_xstrdup(h && h->err ? h->err : "transport error");
@@ -126,6 +152,38 @@ static ne_resp *finish(ne_http_resp *h) {
     }
     ne_http_resp_free(h);
     return r;
+}
+
+/* ── 风控重试(可选, 默认关闭) ─────────────────────────────────────
+ * 对 -460/高频/传输错误做指数退避重试, 复用同一份已加密 form —— 与服务
+ * 端网关限流场景的社区实践一致(重发相同密文, 偶发限流可自愈). -462 行为
+ * 验证不在瞬时可恢复集合内, 不会自动重试. 写操作场景请保持关闭(见
+ * request.h 中 ne_set_risk_retry 的说明). */
+static int g_risk_retry = -1;   /* -1 = 未设置, 回退 NE_RETRY_RISK */
+
+void ne_set_risk_retry(int max_attempts) { g_risk_retry = max_attempts; }
+
+static int risk_retry_max(void) {
+    if (g_risk_retry >= 0) return g_risk_retry;
+    const char *e = getenv("NE_RETRY_RISK");
+    return e ? atoi(e) : 0;
+}
+
+static ne_resp *finish_post_retry(const char *url, const char *form,
+                                  const char *cookies, const char *ua) {
+    int max_retries = risk_retry_max();
+    for (int attempt = 0;; attempt++) {
+        ne_http_resp *h = ne_http_post(url, form, cookies, ua, NULL);
+        ne_resp *r = finish(h);
+        if (attempt >= max_retries) return r;
+        ne_risk_class c = ne_risk_classify(r);
+        if (ne_risk_is_transient(c)) {
+            ne_resp_free(r);
+            ne_sleep_ms(ne_risk_backoff_ms(attempt, 8000));
+            continue;
+        }
+        return r;
+    }
 }
 
 ne_resp *ne_call_weapi(const char *api, const jmap *data) {
@@ -142,10 +200,9 @@ ne_resp *ne_call_weapi(const char *api, const jmap *data) {
     char *form = ne_http_form_encode(kv, 2);
     char *cookies = ne_jar_cookie_header(g_jar);
 
-    ne_http_resp *h = ne_http_post(api, form, cookies, UA_PC, NULL);
+    ne_resp *r = finish_post_retry(api, form, cookies, choose_ua());
     free(form); free(cookies);
     ne_weapi_free(&enc);
-    ne_resp *r = finish(h);
 
     /* CallWeapi (request.go:375): unlike CreateRequest it VALIDATES the
      * body — must unmarshal into map[string]interface{} with a numeric
@@ -273,10 +330,10 @@ static ne_resp *post_common(const char *orig_url, const char *post_url,
     }
 
     char *cookies = ne_jar_cookie_header(scratch);
-    ne_http_resp *h = ne_http_post(post_url, form, cookies, ua, NULL);
+    ne_resp *r = finish_post_retry(post_url, form, cookies, ua);
     free(cookies);
     ne_jar_free(scratch);
-    return finish(h);
+    return r;
 }
 
 ne_resp *ne_create_weapi(const char *url, jmap *data,
@@ -298,7 +355,7 @@ ne_resp *ne_create_weapi(const char *url, jmap *data,
     char *form = ne_http_form_encode(kv, 2);
     char *final_url = ne_rewrite_api_segment(url, "/weapi/");
 
-    ne_resp *r = post_common(url, final_url, form, UA_PC, extra_cookies, 0);
+    ne_resp *r = post_common(url, final_url, form, choose_ua(), extra_cookies, 0);
     free(form); free(final_url);
     ne_weapi_free(&enc);
     return r;
@@ -324,7 +381,7 @@ ne_resp *ne_create_weapi_clean(const char *url, jmap *data) {
     char *form = ne_http_form_encode(kv, 2);
     char *final_url = ne_rewrite_api_segment(url, "/weapi/");
 
-    ne_resp *r = post_common(url, final_url, form, UA_PC, NULL, 1);
+    ne_resp *r = post_common(url, final_url, form, choose_ua(), NULL, 1);
     free(form); free(final_url);
     ne_weapi_free(&enc);
     return r;
@@ -450,7 +507,7 @@ ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
     if (ma && *ma) { extras[n++] = "MUSIC_A"; extras[n++] = ma; }
     extras[n] = NULL;
 
-    ne_resp *r = post_common(url, final_url, form, UA_PC, extras, 0);
+    ne_resp *r = post_common(url, final_url, form, choose_ua(), extras, 0);
     free(form); free(final_url); free(params); free(device_id);
     return r;
 }

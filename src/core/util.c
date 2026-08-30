@@ -1,5 +1,8 @@
 #include "netease/util.h"
 #include <time.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 int64_t ne_now_ms(void) {
     struct timespec ts;
@@ -12,3 +15,15 @@ int64_t ne_now_ms(void) {
 #endif
 }
 int64_t ne_now_unix(void) { return (int64_t)time(NULL); }
+
+void ne_sleep_ms(int64_t ms) {
+    if (ms <= 0) return;
+#ifdef _WIN32
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
+}

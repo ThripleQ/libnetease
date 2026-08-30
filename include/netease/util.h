@@ -26,6 +26,10 @@ static inline char *ne_xstrdup(const char *s) {
 int64_t ne_now_ms(void);
 int64_t ne_now_unix(void);
 
+/* sleep for ms milliseconds (Windows: Sleep; POSIX: nanosleep). no-op for
+ * ms <= 0. Used by the optional request pacing / retry backoff. */
+void ne_sleep_ms(int64_t ms);
+
 /* thread-local storage keyword: GCC/Clang use __thread, MSVC __declspec(thread) */
 #ifdef _MSC_VER
 #define NE_THREAD_LOCAL __declspec(thread)

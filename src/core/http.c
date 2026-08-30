@@ -8,13 +8,72 @@
  * into resp->set_cookies; the request layer reads them straight off the
  * response object, so there is no shared/global cookie back-channel here. */
 #include "netease/http.h"
+#include "netease/rand.h"
+#include "netease/risk.h"
 #include "netease/util.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifdef NE_HAVE_CURL
 #include <curl/curl.h>
 #endif
+
+/* ── 风控应对配置 (setter 优先, 未设置时回退环境变量) ──
+ * 定义在文件前部: curl_request / do_request 都要用, C 要求先声明后使用. */
+
+static char *g_real_ip = NULL;
+static int   g_real_ip_set = 0;
+static int   g_rate_base = -1;    /* -1 = 未设置 */
+static int   g_rate_jitter = -1;
+static int   g_no_keepalive = -1;
+
+void ne_http_set_real_ip(const char *ip) {
+    free(g_real_ip);
+    g_real_ip = (ip && *ip) ? ne_xstrdup(ip) : NULL;
+    g_real_ip_set = 1;
+}
+void ne_http_set_rate_limit(int base_ms, int jitter_ms) {
+    g_rate_base = base_ms;
+    g_rate_jitter = jitter_ms;
+}
+void ne_http_set_no_keepalive(int on) { g_no_keepalive = on ? 1 : 0; }
+
+static const char *http_real_ip(void) {
+    if (g_real_ip_set) return g_real_ip;
+    return getenv("NE_REAL_IP");
+}
+static int http_rate_base(void) {
+    if (g_rate_base >= 0) return g_rate_base;
+    const char *e = getenv("NE_RATE_LIMIT_MS");
+    return e ? atoi(e) : 0;
+}
+static int http_rate_jitter(void) {
+    if (g_rate_jitter >= 0) return g_rate_jitter;
+    const char *e = getenv("NE_RATE_LIMIT_JITTER_MS");
+    return e ? atoi(e) : 0;
+}
+static int http_no_keepalive(void) {
+    if (g_no_keepalive >= 0) return g_no_keepalive;
+    const char *e = getenv("NE_NO_KEEPALIVE");
+    return e && *e && *e != '0';
+}
+static int http_use_http2(void) {
+    const char *e = getenv("NE_HTTP2");
+    return e && *e && *e != '0';
+}
+static int http_browser_headers(void) {
+    const char *e = getenv("NE_BROWSER_HEADERS");
+    return e && *e && *e != '0';
+}
+
+static void http_pace(void) {
+    int base = http_rate_base(), jit = http_rate_jitter();
+    if (base <= 0 && jit <= 0) return;
+    long d = base;
+    if (jit > 0) d += (long)ne_rand_below((uint32_t)(jit + 1));
+    if (d > 0) ne_sleep_ms(d);
+}
 
 /* ── default libcurl transport ────────────────────────── */
 #ifdef NE_HAVE_CURL
@@ -75,12 +134,57 @@ static ne_http_resp *curl_request(const char *url, const char *method,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    if (http_no_keepalive()) {
+        /* 代理换 IP 时禁用连接复用, 让新出口立即生效 */
+        curl_easy_setopt(curl, CURLOPT_FORBID_REUSE, 1L);
+        curl_easy_setopt(curl, CURLOPT_FRESH_CONNECT, 1L);
+    }
+    /* NE_HTTP2=1: 显式协商 HTTP/2 (浏览器标配; 标准 curl 默认可能回落 1.1).
+     * 需要 libcurl 编译时带 nghttp2, 否则自动回落 HTTP/1.1 无副作用.
+     * 注意: 本地 stub (tests/dualrun.py, Python http.server) 仅支持 HTTP/1.1,
+     * 测试时不要开启本选项. */
+    if (http_use_http2()) {
+#ifdef CURL_HTTP_VERSION_2TLS
+        curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+#endif
+    }
 
     struct curl_slist *hdrs = NULL;
     if (user_agent) {
         char ua_hdr[512];
         snprintf(ua_hdr, sizeof ua_hdr, "User-Agent: %s", user_agent);
         hdrs = curl_slist_append(hdrs, ua_hdr);
+    }
+    /* NE_BROWSER_HEADERS=1: 补上浏览器标准请求头 (Accept / Accept-Language /
+     * Sec-Fetch 系 / Upgrade-Insecure-Requests), 让请求头形态更接近真实
+     * 浏览器, 降低 HTTP 层指纹差异. 全部 opt-in, 默认零行为变更. */
+    if (http_browser_headers()) {
+        hdrs = curl_slist_append(hdrs,
+            "Accept: application/json, text/plain, */*");
+        hdrs = curl_slist_append(hdrs,
+            "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8");
+        hdrs = curl_slist_append(hdrs, "Sec-Fetch-Dest: empty");
+        hdrs = curl_slist_append(hdrs, "Sec-Fetch-Mode: cors");
+        hdrs = curl_slist_append(hdrs, "Sec-Fetch-Site: same-origin");
+        hdrs = curl_slist_append(hdrs, "Upgrade-Insecure-Requests: 1");
+    }
+    /* X-Real-IP / X-Forwarded-For 是国内 IP 时, 可规避海外/数据中心出口
+     * 的 460/空 body 风控 —— Binaryify 文档与 api-enhanced / Meting-API
+     * 都同时注入这两个头. 来源优先级: 显式 NE_REAL_IP(或 setter) →
+     * NE_RANDOM_CN_IP=1 每次自动生成国内 IP. */
+    const char *real_ip = http_real_ip();
+    char auto_cnip[16] = "";
+    if ((!real_ip || !*real_ip) && getenv("NE_RANDOM_CN_IP") &&
+        *getenv("NE_RANDOM_CN_IP") != '0') {
+        ne_random_cn_ip(auto_cnip);
+        real_ip = auto_cnip;
+    }
+    if (real_ip && *real_ip) {
+        char rip_hdr[512], xff_hdr[640];
+        snprintf(rip_hdr, sizeof rip_hdr, "X-Real-IP: %s", real_ip);
+        hdrs = curl_slist_append(hdrs, rip_hdr);
+        snprintf(xff_hdr, sizeof xff_hdr, "X-Forwarded-For: %s", real_ip);
+        hdrs = curl_slist_append(hdrs, xff_hdr);
     }
     if (body && strcmp(method, "POST") == 0) {
         char ct_hdr[256];
@@ -161,6 +265,7 @@ static ne_http_resp *do_request(const char *url, const char *method,
         r->err = ne_xstrdup("no http transport installed");
         return r;
     }
+    http_pace();   /* 可选: 请求间隔模拟真人节奏 */
     return t->request(url, method, body, content_type, cookie_header, user_agent);
 }
 

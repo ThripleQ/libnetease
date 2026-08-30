@@ -22,6 +22,28 @@ tests/             向量测试 + verify_qr.py（独立 QR 解码校验）+ dual
 
 依赖：CMake ≥ 3.16、libcurl。
 
+## 风控应对（可选加固，默认全部关闭，零行为变更）
+
+网易云对逆向 API 的风控信号（-460/-462/8821/空 body/高频限流等）与分层应对策略，
+见 **[docs/RISKS.md](docs/RISKS.md)**（基于 2026-08 活跃上游 api-enhanced / chaunsin / Meting-API 调研）。
+
+可选开关（环境变量或 C API，见 `include/netease/risk.h` / `http.h` / `request.h`）：
+
+| 变量 | 作用 |
+|---|---|
+| `NE_REAL_IP=<国内IP>` | 注入 `X-Real-IP`+`X-Forwarded-For`（海外/数据中心 IP 风控的常见解药） |
+| `NE_RANDOM_CN_IP=1` | 未设 NE_REAL_IP 时每请求自动生成国内 IP |
+| `NE_RATE_LIMIT_MS` / `NE_RATE_LIMIT_JITTER_MS` | 请求前随机间隔（真人节奏） |
+| `NE_UA_ROTATE=1` | PC 浏览器 UA 轮换 |
+| `NE_RETRY_RISK=<n>` | 对 -460/高频/传输错误指数退避重试（-462 不自动重试） |
+| `NE_NO_KEEPALIVE=1` | 关连接复用（配合代理换 IP 生效） |
+| `NE_BROWSER_HEADERS=1` | 补浏览器标准请求头（Accept/Accept-Language/Sec-Fetch 系） |
+| `NE_HTTP2=1` | 显式协商 HTTP/2（浏览器标配，需 libcurl 带 nghttp2） |
+
+常用组合（低风险读接口）：`NE_RATE_LIMIT_MS=800 NE_RATE_LIMIT_JITTER_MS=400 NE_RETRY_RISK=3 NE_UA_ROTATE=1`，
+数据中心出口加 `NE_RANDOM_CN_IP=1`，进阶加 `NE_BROWSER_HEADERS=1`；
+TLS 指纹层（curl-impersonate / LD_PRELOAD）接入见 docs/RISKS.md 第八节。
+
 ## 命令一览（与 Go 版 33 命令一一对应）
 
 | 类别 | 命令 |

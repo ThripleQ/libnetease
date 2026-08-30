@@ -226,15 +226,33 @@ C 原实现为：light → `█`（U+2588，全块，错误）。
 | `NE_QR_DUMP` | QR 测试 dump 目录（供 verify_qr.py 读取） |
 | `NE_QR_EC_DEBUG` | 打点 RS 纠错字节输入/输出（定位 EC 差异用，见遗留 2） |
 | `NE_DEBUG_HTTP` | 打开 libcurl `CURLOPT_VERBOSE`，打印 TLS/代理/HTTP 握手细节 |
+| `NE_REAL_IP` | 注入 `X-Real-IP`+`X-Forwarded-For`（国内 IP 规避 460/空 body 风控） |
+| `NE_RANDOM_CN_IP` | 未设 NE_REAL_IP 时每请求自动生成国内 IP |
+| `NE_RATE_LIMIT_MS` / `NE_RATE_LIMIT_JITTER_MS` | 请求前随机间隔 base+[0,jitter) ms |
+| `NE_UA_ROTATE` | PC 浏览器 UA 池轮换 |
+| `NE_RETRY_RISK` | 对 -460/高频/传输错误指数退避重试 n 次（-462 不自动重试） |
+| `NE_NO_KEEPALIVE` | 关闭连接复用（配合代理换 IP 立即生效） |
+| `NE_BROWSER_HEADERS` | 补浏览器标准请求头（Accept/Accept-Language/Sec-Fetch 系/Upgrade-Insecure-Requests） |
+| `NE_HTTP2` | 显式协商 HTTP/2（浏览器标配；需 libcurl 带 nghttp2，stub 测试勿开） |
 
 ## 九、下一步建议（按优先级）
 
 > **2026-08-22 更新**：原遗留 1/2/3 已全部处理完毕（见第五节）。
 
+> **2026-08-30 更新**：新增「十一、风控加固」（可选，默认零行为变更），详见 docs/RISKS.md。
+> **2026-08-30 二次更新**：Windows 完整构建验证通过（CMake + Ninja + cl.exe + ctest，5/5 全绿，
+> 见第九节）；dualrun 的 playlists 期望已同步 coverImgUrl 字段。
+> **2026-08-30 三次更新**：补充第三层防风控（NE_BROWSER_HEADERS / NE_HTTP2）+ docs/RISKS.md 第八节
+> TLS 指纹接入指南（curl-impersonate）。
+
 1. **Windows 编译验证**：README 声称跨平台，但尚未在 MSVC/MinGW 下实际编译过。可顺带跑一遍 `run_tests.sh`。
+   （2026-08-30 本机已验证：`build_ninja.sh` 用 CMake+Ninja+cl.exe 完整构建并 `ctest` **5/5 全绿**——
+   crypto/jval/rewrite/qr 单测 + dualrun 52 用例全部通过。无需 MSBuild/VS 项目文件。）
 2. **真实网易服务器联调**：目前所有验证都是本地 stub 回环，沙箱出口 IP 被风控。需要在真实网络环境（或代理）下跑一次登录 + 播放全链路。
-3. **（可选）修复 `verify_qr.py`**：其 de-interleave / RS 校验逻辑有 bug（对有效 Go 码全 mask 报 RS 失败），如后续需要独立验证二维码可扫性，先修它；或改用 zxing/quirc 等成熟解码库做交叉验证。
-4. **（可选）清理调试残留**：`qrenc.c` 中 `NE_QR_DEBUG`/`NE_QR_EC_DEBUG` 打点代码（DBG encdata/finalstream/mask penalty 等）已保留，属零运行时开销（仅环境变量触发），可保留亦可按需删除。
+3. **（可选）TLS 指纹层验证**：在真实环境用 JA3/JA4 指纹检测（如 `ja3` 在线检测、tlsfingerprint）对比
+   标准 libcurl 与 `LD_PRELOAD=libcurl-impersonate.so` 的差异，确认网易是否对该维度敏感（见 docs/RISKS.md 第八节）。
+4. **（可选）修复 `verify_qr.py`**：其 de-interleave / RS 校验逻辑有 bug（对有效 Go 码全 mask 报 RS 失败），如后续需要独立验证二维码可扫性，先修它；或改用 zxing/quirc 等成熟解码库做交叉验证。
+5. **（可选）清理调试残留**：`qrenc.c` 中 `NE_QR_DEBUG`/`NE_QR_EC_DEBUG` 打点代码（DBG encdata/finalstream/mask penalty 等）已保留，属零运行时开销（仅环境变量触发），可保留亦可按需删除。
 
 > **已实证（2026-08-22）**：本沙箱出口 IP 对网易 weapi 直接返回 `HTTP 200 + 空 body`（`size=0`），这是数据中心 IP 风控，**非 port 代码 bug**。验证过程：
 > - `NE_DEBUG_HTTP=1` 显示 CLI 走默认代理（`http://127.0.0.1:18080`）、TLS 校验通过、`POST /weapi/login/qrcode/unikey` 返回 `HTTP/2 200`，但 body 为 0 字节。
@@ -256,3 +274,66 @@ C 原实现为：light → `█`（U+2588，全块，错误）。
 | Go 位图探针（bm_dbg 打点版） | `/data/user/work/qrprobe/`（`bm_dbg.go` / `bm.go`） |
 | QR 诊断脚本（Python） | `/data/user/work/`（artdiff.py / streamdiff.py / opencvprobe.py / renderscan.py 等，见遗留 2） |
 | QR 调试输出（NE_QR_DUMP） | `build/...` 由 `tests/test_qr.c` 生成 `case0.txt` 等位图 dump |
+
+## 十一、风控加固（2026-08-30）
+
+> 调研对象：活跃上游（2026-08 时点）—— api-enhanced（Node，2026-08-27 仍有提交）、
+> chaunsin/netease-cloud-music（Go，2026-08 仍有提交）、Meting-API（JS）；
+> 原版 Binaryify/NeteaseCloudMusicApi 已于 2024-02 归档清空（仅 README），pyncm 已下架。
+> 完整调研与策略见 **docs/RISKS.md**。
+
+### 目标与纪律
+- **默认零行为变更**：所有加固均为 opt-in（环境变量或新 C API），不启用时请求字节流
+  与 Go v1.6.0 移植完全一致，dualrun 逐字节兼容不受影响。
+- **新增文件**：`include/netease/risk.h` + `src/core/risk.c`（风控分类/退避/随机国内 IP）。
+
+### 新增能力清单
+| 能力 | 入口 | 说明 |
+|---|---|---|
+| 风控响应分类（8 类） | `ne_risk_classify` / `ne_risk_reason` / `ne_risk_is_transient` | 200/301/400/-460/-462/8821/429-503-403/空 body/传输错误 |
+| 指数退避 + 抖动 | `ne_risk_backoff_ms(attempt, max)` | 200ms×2ⁿ，±25% 抖动 |
+| 空 body（数据中心 IP 风控）检测 | `ne_risk_is_empty_body` | 对应 HANDOFF 实证的 `HTTP 200 + size=0` |
+| 随机国内 IPv4 | `ne_random_cn_ip(buf)` | 116-125/218-223 全国内 /8 段内随机（上游同款思路） |
+| X-Real-IP + X-Forwarded-For 双头 | `ne_http_set_real_ip` / `NE_REAL_IP` | api-enhanced/Meting 均为双头注入 |
+| 自动随机国内 IP | `NE_RANDOM_CN_IP=1` | 未显式设置时每请求生成 |
+| 请求限速 + 抖动 | `ne_http_set_rate_limit` / `NE_RATE_LIMIT_MS`+`NE_RATE_LIMIT_JITTER_MS` | 请求前随机间隔 |
+| 风控/传输自动重试 | `ne_set_risk_retry` / `NE_RETRY_RISK` | 仅瞬时可恢复分类；-462 不自动重试 |
+| UA 轮换 | `NE_UA_ROTATE=1` | PC 浏览器 UA 池（Chrome/Edge/Firefox/Safari） |
+| 浏览器化请求头 | `NE_BROWSER_HEADERS=1` | Accept/Accept-Language/Sec-Fetch 系/Upgrade-Insecure-Requests |
+| HTTP/2 协商 | `NE_HTTP2=1` | 显式 `CURL_HTTP_VERSION_2TLS`（浏览器标配；stub 测试勿开） |
+| 连接复用开关 | `ne_http_set_no_keepalive` / `NE_NO_KEEPALIVE` | 配合代理换 IP 立即生效 |
+| 毫秒睡眠 | `ne_sleep_ms`（util） | 跨平台（Windows Sleep / POSIX nanosleep） |
+| `ne_resp` 增加 `http_status` | request.h | 兼容扩展，分类依赖 |
+
+### 实现要点（坑位记录）
+- `UA_PC` 原为 `static const char *`，因 C11 要求数组初值常量，改为宏 `#define UA_PC ...`，
+  供 `UA_PC_POOL[]` 常量初始化；所有引用处兼容。
+- 重试复用同一份已加密 form（重发相同密文）——与 Meting-API「-460 重试 5 次、间隔 100ms」
+  思路一致，网关偶发限流可自愈；写操作场景建议保持关闭（可能重复生效）。
+- 随机国内 IP 段表刻意排除 58-61/202-211（混有海外段），避免"看似国内"反露马脚。
+
+### 上游对照（重要差异）
+- **NMTID**：api-enhanced 2026-08-24 修复——固定假 NMTID 会触发风控，真值应由服务端
+  在"不带 NMTID 的 eapi 请求"的 Set-Cookie 下发（保底 `00O`+38hex）。libnetease 沿用
+  Go v1.6.0 的 `some_random_id_from_strategy`（filterJar 不上线、仅 os=pc 生效）。若 eapi
+  场景被 -462 缠住，宿主可自行向 jar 注入服务端下发的 `NMTID` cookie 覆盖。
+- **易盾反作弊 token**（`X-antiCheatToken` v2/v3）：api-enhanced 用 jsdom 跑 Watchman SDK
+  获取，仅注册/验证码类接口需要，libnetease 无此功能，暂不实现。
+- **游客 MUSIC_A / xeapi**：上游有，libnetease 当前接口用不到，仅文档记录。
+- **TLS 指纹（第三层）**：libnetease 默认 transport 为标准 libcurl，TLS Client Hello 与浏览器差异
+  大（JA3/JA4 可识别）。已提供 `NE_HTTP2`/`NE_BROWSER_HEADERS` 两个 opt-in 缓解项，完整方案
+  （curl-impersonate / LD_PRELOAD）见 docs/RISKS.md 第八节。网易是否启用 TLS 指纹检测未公开证实。
+
+### Windows 构建备注
+- **结论：本地构建工具链完好**。完整流程 `build_ninja.sh`（CMake "Ninja" 生成器 + cl.exe + vcpkg）：
+  `cmake configure → cmake --build → ctest` **5/5 全绿**（crypto/jval/rewrite/qr/dualrun 52 用例）。
+  前置：cl.exe 环境变量（INCLUDE/LIB，见脚本）、vcpkg（curl）、ninja（下载到 `C:/tools`）、
+  隔离 venv Python（pycryptodome，用于生成 expected.h 向量）。
+- 唯一注意：**cmake 的 "Visual Studio" 生成器在本机查询 VCTargetsPath 时 MSBuild 报
+  Access violation**（cmake 调用 MSBuild 探测时崩，疑似该 VS 实例问题）。这不影响构建本身——
+  Ninja/NMake/直编均绕开它。若要用 VS 生成器，先排查 MSBuild 本身。
+- `build_check.sh`：快速语法检查（cl.exe 直编全部 .c，**带 NE_HAVE_CURL/NE_HAVE_ZLIB 宏**，
+  与真实构建同配置，能抓住 curl 路径编译错误；教训：不加宏会漏检 http.c 的声明顺序 bug）。
+- dualrun 期望修复：commit 383f935 起 playlists 输出含 `coverImgUrl` 字段（Go json 键排序，
+  `coverImgUrl` 在 `id` 前），dualrun.py 期望已同步。
+

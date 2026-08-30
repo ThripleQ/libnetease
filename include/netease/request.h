@@ -18,6 +18,9 @@
 typedef struct {
     double code;     /* API business code ("code" field), 200 fallback,
                         520 on transport error (Go convention) */
+    long   http_status; /* raw HTTP status from the transport, 0 on
+                           transport error (added by the risk-control
+                           hardening; existing callers ignore it) */
     char  *body;     /* malloc'd response body */
     size_t body_len;
     int    err;      /* 0 ok; 1 transport error; 2 no code field */
@@ -88,4 +91,11 @@ char *ne_generate_chain_id(void);
  * Replacement is "/weapi/" or "/api/"; a segment not followed by '/' is
  * no match. malloc'd result. Public for the unit tests. */
 char *ne_rewrite_api_segment(const char *url, const char *replacement);
+
+/* 风控应对(可选, 默认关闭): 对 -460/高频限流/传输错误做指数退避自动重试,
+ * 最多 max_attempts 次; <=0 关闭. 环境变量 NE_RETRY_RISK=<n> 同效.
+ * 仅重试"瞬时可恢复"的分类(见 ne_risk_is_transient), -462 行为验证不重试.
+ * 注意: 写操作(like/subscribe/track-add 等)若服务端已受理但响应丢失,
+ * 重试可能重复生效 —— 写操作场景请保持关闭或自行保证幂等. */
+void ne_set_risk_retry(int max_attempts);
 #endif
