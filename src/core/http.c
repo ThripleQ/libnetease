@@ -27,6 +27,7 @@ static int   g_real_ip_set = 0;
 static int   g_rate_base = -1;    /* -1 = 未设置 */
 static int   g_rate_jitter = -1;
 static int   g_no_keepalive = -1;
+static int   g_random_cn_ip = -1;
 
 void ne_http_set_real_ip(const char *ip) {
     free(g_real_ip);
@@ -38,6 +39,7 @@ void ne_http_set_rate_limit(int base_ms, int jitter_ms) {
     g_rate_jitter = jitter_ms;
 }
 void ne_http_set_no_keepalive(int on) { g_no_keepalive = on ? 1 : 0; }
+void ne_http_set_random_cn_ip(int on) { g_random_cn_ip = on ? 1 : 0; }
 
 static int http_rate_base(void) {
     if (g_rate_base >= 0) return g_rate_base;
@@ -58,14 +60,32 @@ static void http_pace(void) {
     if (d > 0) ne_sleep_ms(d);
 }
 
-/* ── default libcurl transport ────────────────────────── */
-#ifdef NE_HAVE_CURL
-/* curl-only toggles: unused in no-curl builds (Android/JNI), so they live
- * inside this block to keep -Wunused-function clean. */
 static const char *http_real_ip(void) {
     if (g_real_ip_set) return g_real_ip;
     return getenv("NE_REAL_IP");
 }
+
+static int http_random_cn_ip_enabled(void) {
+    if (g_random_cn_ip >= 0) return g_random_cn_ip;
+    const char *e = getenv("NE_RANDOM_CN_IP");
+    return e && *e && *e != '0';
+}
+
+const char *ne_http_get_real_ip(void) {
+    const char *ip = http_real_ip();
+    if (ip && *ip) return ip;
+    if (http_random_cn_ip_enabled()) {
+        static char auto_ip[16];
+        ne_random_cn_ip(auto_ip);
+        return auto_ip;
+    }
+    return NULL;
+}
+
+/* ── default libcurl transport ────────────────────────── */
+#ifdef NE_HAVE_CURL
+/* curl-only toggles: unused in no-curl builds (Android/JNI), so they live
+ * inside this block to keep -Wunused-function clean. */
 static int http_no_keepalive(void) {
     if (g_no_keepalive >= 0) return g_no_keepalive;
     const char *e = getenv("NE_NO_KEEPALIVE");
@@ -176,8 +196,7 @@ static ne_http_resp *curl_request(const char *url, const char *method,
      * NE_RANDOM_CN_IP=1 每次自动生成国内 IP. */
     const char *real_ip = http_real_ip();
     char auto_cnip[16] = "";
-    if ((!real_ip || !*real_ip) && getenv("NE_RANDOM_CN_IP") &&
-        *getenv("NE_RANDOM_CN_IP") != '0') {
+    if ((!real_ip || !*real_ip) && http_random_cn_ip_enabled()) {
         ne_random_cn_ip(auto_cnip);
         real_ip = auto_cnip;
     }

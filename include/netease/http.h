@@ -62,7 +62,8 @@ char *ne_http_form_encode(const char *const *kv, size_t n_pairs);
  *
  * - ne_http_set_real_ip(ip):     给请求附加 X-Real-IP 与 X-Forwarded-For 头
  *   (国内 IP 可规避海外/数据中心出口的 460/空 body 风控)。env: NE_REAL_IP
- *   另设 NE_RANDOM_CN_IP=1 可在未显式设置时, 每次请求自动生成国内 IP。
+ *   另设 NE_RANDOM_CN_IP=1 或 ne_http_set_random_cn_ip(1) 可在未显式设置时,
+ *   每次请求自动生成国内 IP。
  * - ne_http_set_rate_limit(base, jitter): 每次请求前强制间隔
  *   base + rand[0, jitter) 毫秒, 模拟真人节奏。env: NE_RATE_LIMIT_MS
  *   + NE_RATE_LIMIT_JITTER_MS
@@ -76,4 +77,12 @@ char *ne_http_form_encode(const char *const *kv, size_t n_pairs);
 void ne_http_set_real_ip(const char *ip);
 void ne_http_set_rate_limit(int base_ms, int jitter_ms);
 void ne_http_set_no_keepalive(int on);
+void ne_http_set_random_cn_ip(int on);
+
+/* Returns the real IP to inject as X-Real-IP / X-Forwarded-For, or NULL.
+ * Respects ne_http_set_real_ip() / NE_REAL_IP, then ne_http_set_random_cn_ip()
+ * / NE_RANDOM_CN_IP. Non-curl transports call this to replicate the IP
+ * injection that curl_request does internally. Uses a static buffer for
+ * auto-generated IPs — safe under the single-threaded request contract. */
+const char *ne_http_get_real_ip(void);
 #endif
