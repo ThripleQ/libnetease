@@ -174,7 +174,7 @@ def dispatch(state, conn, url, cookie):
         return respond_raw(conn, ACCOUNT)
     if url == "/weapi/v3/song/detail":
         return respond_raw(conn, SONGS)
-    if url == "/api/v3/playlist/detail":               # linuxapi inner
+    if url == "/weapi/v6/playlist/detail":             # weapi (Go 版为 linuxapi inner /api/v3)
         return respond_raw(conn, PLAYLIST_DETAIL)
     if url == "/weapi/user/playlist":
         return respond_raw(conn, USER_PLAYLIST)

@@ -58,8 +58,8 @@ ne_resp *ne_album_detail(const char *id);
  * ids_csv "1,2,3" → c=[{"id":"1"},..], ids=[1,2,3] */
 ne_resp *ne_song_detail(const char *ids_csv);
 
-/* PlaylistDetailService — linuxapi weapi/v3/playlist/detail,
- * data {id, n=100000, s} (s empty → "8") */
+/* PlaylistDetailService — weapi v6/playlist/detail, data
+ * {id, n=100000, s} (s empty → "8"). 2026-09: was linuxapi v3. */
 ne_resp *ne_playlist_detail(const char *id, const char *s);
 
 /* UserPlaylistService — weapi/user/playlist, limit/offset empty → 30/0 */

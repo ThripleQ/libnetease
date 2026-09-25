@@ -32,7 +32,7 @@
 | 通道 | 重写目标 | 加密 | 现状 |
 |---|---|---|---|
 | weapi | `/weapi/` | 双层 AES-CBC + RSA 加密随机 key | 主力通道 |
-| linuxapi | `/api/`（内层） | 单层 AES-ECB，POST `/api/linux/forward` | ⚠️ 社区活跃项目已弃用（见 §8） |
+| linuxapi | `/api/`（内层） | 单层 AES-ECB，POST `/api/linux/forward` | ⚠️ 上游已弃用，仅 lyric / song_url_old 在用（见 §8） |
 | eapi | `/eapi/` | AES-ECB + header 反欺诈对象 | 仅 playlist_update_name 在用 |
 
 ## 2. 构建
@@ -173,7 +173,7 @@ typedef struct {
 | `ne_album_purchased(limit,offset)` | `/weapi/digitalAlbum/purchased` | W | | ✓ |
 | `ne_album_detail(id)` | `/weapi/v1/album/<id>` | W | body 同时带 id 字段 | ✗ |
 | `ne_song_detail(ids_csv)` | `/weapi/v3/song/detail` | W | `c=[{"id":…},…]` | ✗ |
-| `ne_playlist_detail(id,s)` | linuxapi 信封内 `/api/v3/playlist/detail` | **L** | n=100000；s 空 → "8"（订阅者数） | ✗ |
+| `ne_playlist_detail(id,s)` | `/weapi/v6/playlist/detail` | W | n=100000；s 空 → "8"（订阅者数）。2026-09 起（原 linuxapi+v3） | ✗ |
 | `ne_user_playlist(uid,limit,offset)` | `/weapi/user/playlist` | W | 空 → 30/0 | ✗ |
 | `ne_lyric(id)` | linuxapi 信封内 `/api/song/lyric` | **L** | lv/kv/tv=-1 | ✗ |
 | `ne_toplist_detail(void)` | `/weapi/toplist/detail` | W | | ✗ |
@@ -237,14 +237,11 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
 - 桌面：CLI 自动 load/save。嵌入式：`ne_set_cookie_file()` 指到应用私有目录，`ne_jar_import_cookies()` 从 WebView 导出的 cookie 串导入（nume 的网页登录即此方案）。
 - `filterJar` 语义（cookiejar.c）：反欺诈策略写入的**假 NMTID**（`some_random_id_from_strategy`）与 cookie 属性段（`Expires=` 等带 = 的部分）不会进入 jar / 不会落盘。
 
-## 8. 已知限制与风险（2026-09 审计结论）
+## 8. 已知限制与风险（2026-09 审计，对照 api-enhanced 现行实现）
 
-对照活跃权威项目（NeteaseCloudMusicApiEnhanced/api-enhanced，2026-09 仍活跃）：
+1. **linuxapi 通道**（仅剩 lyric / song_url_old）—— api-enhanced 生产模块零使用；playlist_detail 已平移 weapi+v6。若 `/api/linux/forward` 被下线，这两个最先断。缓解：lyric 平移 weapi 并补 `rv:-1`、`_nmclfl:1` 字段。
+2. **NMTID**：复刻 Go 的假值行为（内存中、不落盘）；api-enhanced 改为缓存服务端下发真值并在 eapi 请求复用。高风控环境宿主可通过 jar 注入真值覆盖。
+3. **song_url_v1**：走 weapi，当前有效；api-enhanced 另有 xeapi（会话密钥协商）进阶方案，高音质场景可关注。
+4. **协议正确性**：四把密钥、RSA 公钥、URL 重写、JSON 转义经向量级测试 + 差分双跑验证（52 用例）。
 
-1. **linuxapi 通道**（playlist_detail / lyric / song_url_old 三个服务）—— api-enhanced 生产模块已全部弃用该通道（仅调试工具保留），libnetease 是锚定 Go v1.6.0 的刻意选择。若 `/api/linux/forward` 被服务端下线，这三个接口最先断。**缓解预案**：playlist_detail 可平移到 weapi + `/api/v6/playlist/detail`（权威现行端点）；lyric 平移 weapi + 补 `rv:-1, _nmclfl:1` 字段。
-2. **playlist_detail 版本落后**：libnetease 用 v3（Go 复刻），api-enhanced 已用 v6。
-3. **NMTID**：libnetease 复刻 Go 的假值行为（内存中、不落盘）；api-enhanced 改为缓存服务端下发的真 NMTID 并在 eapi 请求里复用（2026-08 修复）。高风控环境下假值可能吃亏，宿主可通过 jar 注入真值覆盖。
-4. **song_url_v1 通道**：libnetease 走 weapi；api-enhanced 升级到自研 xeapi（会话密钥协商）并建议高音质时补 android cookie。weapi 路径当前仍工作，属于进阶差异而非故障。
-5. **c38c41f 前的双跑基线**：单跑 40/40 用例全绿 + `--go` 双跑逐字节对齐（锚定 Go v1.6.0），协议本身（密钥/加密/URL 重写/JSON 转义）经向量级验证无误。
-
-维护纪律提醒：服务函数行为与 `services.h` 注释如有出入，**以 services.c 实现为准**（例如 `ne_login_refresh`/`ne_record_recent` 注释仍写 CallWeapi，实现已是 create_weapi）。
+服务行为与 `services.h` 注释有出入时**以 services.c 为准**（如 `ne_login_refresh`/`ne_record_recent` 注释仍写 CallWeapi，实现为 create_weapi）。

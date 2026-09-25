@@ -262,7 +262,9 @@ ne_resp *ne_song_detail(const char *ids_csv) {
     return r;
 }
 
-/* ── playlist_detail_service.go (linuxapi) ─────────────── */
+/* playlist_detail_service.go 复刻为 linuxapi+v3；2026-09 审计后平移 weapi+v6，
+ * 对齐活跃上游 api-enhanced (playlist_detail.js: /api/v6/playlist/detail) ——
+ * linuxapi 通道已弃用（上游生产模块零使用），weapi 为网页端原生路径。 */
 ne_resp *ne_playlist_detail(const char *id, const char *s) {
     if (!s || !*s) s = "8";
     jmap *data = jmap_new();
@@ -270,9 +272,10 @@ ne_resp *ne_playlist_detail(const char *id, const char *s) {
     jmap_put(data, "n", "100000");
     jmap_put(data, "s", s);
     char url[640];
-    snprintf(url, sizeof url, "%s/weapi/v3/playlist/detail", ne_api_base());
-    /* ne_call_linuxapi takes ownership of data */
-    return ne_call_linuxapi(url, data, NULL);
+    snprintf(url, sizeof url, "%s/weapi/v6/playlist/detail", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
 }
 
 /* ── user_playlist_service.go ──────────────────────────── */
