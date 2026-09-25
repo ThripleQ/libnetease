@@ -126,7 +126,10 @@ ne_resp *ne_song_url_old(const char *id, const char *br) {
     jmap_put(data, "br", br);
     char url[640];
     snprintf(url, sizeof url, "%s/api/song/enhance/player/url", ne_api_base());
-    return ne_create_weapi(url, data, COOKIES_OS_PC);
+    /* ne_create_weapi 不接管 data（只有 ne_call_* 会），必须自行释放 */
+    ne_resp *r = ne_create_weapi(url, data, COOKIES_OS_PC);
+    jmap_free(data);
+    return r;
 }
 
 /* ── song_download_url (original apiservice — no Go service) ──
@@ -304,7 +307,10 @@ ne_resp *ne_lyric(const char *id) {
     jmap_put(data, "_nmclfl", "1");
     char url[640];
     snprintf(url, sizeof url, "%s/api/song/lyric", ne_api_base());
-    return ne_create_weapi(url, data, COOKIES_OS_PC);
+    /* ne_create_weapi 不接管 data（只有 ne_call_* 会），必须自行释放 */
+    ne_resp *r = ne_create_weapi(url, data, COOKIES_OS_PC);
+    jmap_free(data);
+    return r;
 }
 
 /* ── toplist_detail_service.go ─────────────────────────── */
