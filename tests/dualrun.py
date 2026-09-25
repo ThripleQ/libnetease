@@ -152,10 +152,9 @@ def dispatch(state, conn, url, cookie):
         if "QOK" in cookie:
             return respond_raw(conn, SONGURL_OK)
         return respond_raw(conn, SONGURL_V1)
-    if url in ("/weapi/song/enhance/player/url",       # weapi (check-music)
-               "/api/song/enhance/player/url"):        # linuxapi inner (song-url old)
+    if url == "/weapi/song/enhance/player/url":        # check-music + song-url old (both weapi since 2026-09)
         return respond_raw(conn, SONGURL_OLD)
-    if url == "/api/song/lyric":                       # linuxapi inner
+    if url == "/weapi/song/lyric":                     # lyric (weapi since 2026-09; was linuxapi inner)
         return respond_raw(conn, LYRIC)
     if url == "/weapi/play-record/song/list":
         return respond_raw(conn, RECENT)

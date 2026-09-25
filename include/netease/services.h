@@ -15,7 +15,7 @@ ne_resp *ne_search(const char *s, const char *type,
 /* CheckMusicService — ids=[id], br empty → "999000" */
 ne_resp *ne_check_music(const char *id, const char *br);
 
-/* RecordRecentSongsService — CallWeapi /api/play-record/song/list */
+/* RecordRecentSongsService — weapi /play-record/song/list (create_weapi) */
 ne_resp *ne_record_recent(const char *limit);
 
 /* RecommendResourceService — 每日推荐歌单 */
@@ -25,7 +25,7 @@ ne_resp *ne_recommend_resource(void);
  * level empty → "higher"; "sky" adds immerseType=c51 */
 ne_resp *ne_song_url_v1(const char *id, const char *level);
 
-/* SongUrlService — linuxapi /api/song/enhance/player/url, cookie os=pc */
+/* SongUrlService — weapi /song/enhance/player/url, cookie os=pc. 2026-09: was linuxapi */
 ne_resp *ne_song_url_old(const char *id, const char *br);
 
 /* SongDownloadUrlService — CallWeapi /weapi/song/enhance/download/url/v1,
@@ -66,7 +66,7 @@ ne_resp *ne_playlist_detail(const char *id, const char *s);
 ne_resp *ne_user_playlist(const char *uid, const char *limit,
                           const char *offset);
 
-/* LyricService — linuxapi /api/song/lyric, cookie os=pc, lv/kv/tv=-1 */
+/* LyricService — weapi /song/lyric, cookie os=pc, lv/kv/tv/rv=-1, _nmclfl=1. 2026-09: was linuxapi */
 ne_resp *ne_lyric(const char *id);
 
 /* ToplistDetailService — weapi/toplist/detail */
@@ -122,7 +122,7 @@ ne_resp *ne_playlist_update_name(const char *id, const char *name);
  * os=ios/appver=8.7.01, {username, password=md5hex, rememberLogin} */
 ne_resp *ne_login_email(const char *email, const char *password);
 
-/* LoginCellphoneService — CallWeapi /weapi/login/cellphone with
+/* LoginCellphoneService — weapi (create_weapi) /login/cellphone with
  * {phone, countrycode(86), csrf_token, password=md5hex, rememberLogin,
  * type=1, https=true, remember=true} */
 ne_resp *ne_login_cellphone(const char *phone, const char *password);
@@ -138,7 +138,7 @@ ne_resp *ne_send_captcha(const char *phone, const char *countrycode);
 ne_resp *ne_login_cellphone_captcha(const char *phone, const char *captcha,
                                     const char *countrycode);
 
-/* LoginRefreshService — ApplyRequestStrategy + csrf from jar, CallWeapi
+/* LoginRefreshService — ApplyRequestStrategy + csrf from jar, weapi (create_weapi)
  * /weapi/login/token/refresh */
 ne_resp *ne_login_refresh(void);
 #endif

@@ -583,10 +583,13 @@ ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
 void ne_apply_request_strategy(void) {
     jar_lock();
     if (!g_jar) init_jar_locked();
-    /* os=pc + fixed fake NMTID — filterJar keeps the fake value off disk but
-     * the jar-in-memory carries it, exactly like the Go process */
+    /* os=pc + fake NMTID — filterJar keeps the fake value off disk but
+     * the jar-in-memory carries it, exactly like the Go process.
+     * 2026-09: a server-issued NMTID (already in the jar) is never
+     * overwritten — matching api-enhanced, which reuses the real value. */
     ne_jar_set(g_jar, "os", "pc");
-    ne_jar_set(g_jar, "NMTID", "some_random_id_from_strategy");
+    if (!ne_jar_get(g_jar, "NMTID") || !*ne_jar_get(g_jar, "NMTID"))
+        ne_jar_set(g_jar, "NMTID", "some_random_id_from_strategy");
     jar_unlock();
 }
 

@@ -114,7 +114,8 @@ ne_resp *ne_song_url_v1(const char *id, const char *level) {
     return r;
 }
 
-/* ── song_url_service.go (linuxapi) ────────────────────── */
+/* ── song_url_service.go — 2026-09: linuxapi → weapi（与 check_music
+ * 同端点同参数，check_music 在 weapi 上长期工作）────────── */
 ne_resp *ne_song_url_old(const char *id, const char *br) {
     if (!br || !*br) br = "320000";
     char ids[256];
@@ -125,8 +126,7 @@ ne_resp *ne_song_url_old(const char *id, const char *br) {
     jmap_put(data, "br", br);
     char url[640];
     snprintf(url, sizeof url, "%s/api/song/enhance/player/url", ne_api_base());
-    /* ne_call_linuxapi takes ownership of data */
-    return ne_call_linuxapi(url, data, COOKIES_OS_PC);
+    return ne_create_weapi(url, data, COOKIES_OS_PC);
 }
 
 /* ── song_download_url (original apiservice — no Go service) ──
@@ -292,17 +292,19 @@ ne_resp *ne_user_playlist(const char *uid, const char *limit,
     return r;
 }
 
-/* ── lyric_service.go (linuxapi) ───────────────────────── */
+/* ── lyric_service.go — 2026-09: linuxapi → weapi（上游 api-enhanced 同路径），
+ * 补 rv（罗马音）与 _nmclfl（防空标记）字段 ─────────────── */
 ne_resp *ne_lyric(const char *id) {
     jmap *data = jmap_new();
     jmap_put(data, "id", id);
     jmap_put(data, "lv", "-1");
     jmap_put(data, "kv", "-1");
     jmap_put(data, "tv", "-1");
+    jmap_put(data, "rv", "-1");
+    jmap_put(data, "_nmclfl", "1");
     char url[640];
     snprintf(url, sizeof url, "%s/api/song/lyric", ne_api_base());
-    /* ne_call_linuxapi takes ownership of data */
-    return ne_call_linuxapi(url, data, COOKIES_OS_PC);
+    return ne_create_weapi(url, data, COOKIES_OS_PC);
 }
 
 /* ── toplist_detail_service.go ─────────────────────────── */
