@@ -45,6 +45,19 @@ static const char *choose_ua(void) {
 static ne_jar *g_jar = NULL;
 static char   *g_cookie_path = NULL;
 
+/* Guards the process-global jar against concurrent request threads. Any read
+ * that feeds values used beyond the lock scope (ne_call_eapi's extras, for
+ * example) takes a jar_snapshot() first, so pointers never dangle. First
+ * caller initializes the mutex once on the startup thread (see util.h
+ * NE_MUTEX_*). */
+static ne_mutex g_jar_lock;
+static int g_jar_lock_init = 0;
+static void jar_lock(void) {
+    if (!g_jar_lock_init) { NE_MUTEX_INIT(g_jar_lock); g_jar_lock_init = 1; }
+    NE_MUTEX_LOCK(g_jar_lock);
+}
+static void jar_unlock(void) { NE_MUTEX_UNLOCK(g_jar_lock); }
+
 /* API base override. Priority: explicit ne_set_api_base() (highest), then the
  * NE_API_BASE env fallback (test hook), then the production default. The env
  * path is a convenience for CLI/test hosts; embedded hosts (Android, GUI) that
@@ -78,8 +91,10 @@ void ne_set_cookie_file(const char *path) {
 }
 const char *ne_cookie_file(void) { return g_cookie_path; }
 
-void ne_jar_reload(void) {
-    if (g_jar) ne_jar_free(g_jar);
+/* Create/load the global jar exactly once. MUST be called with g_jar_lock
+ * held (via jar_lock()). */
+static void init_jar_locked(void) {
+    if (g_jar) return;
     g_jar = ne_jar_new();
     if (g_cookie_path) ne_jar_load_file(g_jar, g_cookie_path);
     /* GetGlobalCookieJar: ensure sDeviceId exists (v1.6.0 behaviour) */
@@ -92,16 +107,58 @@ void ne_jar_reload(void) {
     }
 }
 
+/* Hard reload from disk. The request pipeline uses init-on-first-access
+ * (init_jar_locked) rather than constant reloads; this is the CLI persist /
+ * refresh path. */
+void ne_jar_reload(void) {
+    jar_lock();
+    if (g_jar) ne_jar_free(g_jar);
+    g_jar = NULL;
+    init_jar_locked();
+    jar_unlock();
+}
+
+/* Snapshot the global jar's cookies into a fresh scratch jar. The lock is
+ * held only for the quick copy; afterwards callers read the scratch (their
+ * owned copy) while other threads may write the live jar. This lets the
+ * request-assembly read a consistent, non-dangling view AND keeps HTTP I/O
+ * (which never touches the jar) outside the lock — so concurrent requests
+ * actually run in parallel instead of serializing. */
+static ne_jar *jar_snapshot(void) {
+    jar_lock();
+    if (!g_jar) init_jar_locked();
+    ne_jar *snap = ne_jar_new();
+    char *hdr = ne_jar_cookie_header(g_jar);
+    ne_jar_merge_cookie_str(snap, hdr);
+    free(hdr);
+    jar_unlock();
+    return snap;
+}
+
+/* Build a fresh cookie header string from the live jar, under lock. Returns a
+ * malloc'd string owned by the caller (already a private copy, safe to use
+ * after the lock is released). */
+static char *jar_cookie_header_alloc(void) {
+    jar_lock();
+    if (!g_jar) init_jar_locked();
+    char *h = ne_jar_cookie_header(g_jar);
+    jar_unlock();
+    return h;
+}
+
 /* Merge Set-Cookie lines delivered by the transport directly from the
  * response object — no thread-local back-channel (see the thread contract
  * note in request.h). */
 static void jar_sync_set_cookies(const char *set_cookies) {
     if (!set_cookies || !*set_cookies) return;
     char *copy = ne_xstrdup(set_cookies);
+    jar_lock();
+    if (!g_jar) init_jar_locked();
     char *save = NULL;
     for (char *line = strtok_r(copy, "\n", &save); line;
          line = strtok_r(NULL, "\n", &save))
         ne_jar_merge_cookie_str(g_jar, line);
+    jar_unlock();
     free(copy);
 }
 
@@ -187,8 +244,6 @@ static ne_resp *finish_post_retry(const char *url, const char *form,
 }
 
 ne_resp *ne_call_weapi(const char *api, const jmap *data) {
-    if (!g_jar) ne_jar_reload();
-
     ne_weapi_result enc;
     if (ne_weapi(data, &enc) != 0) {
         ne_resp *r = ne_xmalloc(sizeof(ne_resp));
@@ -198,7 +253,7 @@ ne_resp *ne_call_weapi(const char *api, const jmap *data) {
     }
     const char *kv[4] = { "params", enc.params, "encSecKey", enc.enc_sec_key };
     char *form = ne_http_form_encode(kv, 2);
-    char *cookies = ne_jar_cookie_header(g_jar);
+    char *cookies = jar_cookie_header_alloc();
 
     ne_resp *r = finish_post_retry(api, form, cookies, choose_ua());
     free(form); free(cookies);
@@ -291,7 +346,9 @@ char *ne_rewrite_api_segment(const char *url, const char *replacement) {
 static ne_resp *post_common(const char *orig_url, const char *post_url,
                             const char *form, const char *ua,
                             const char *const *extra_cookies, int clean) {
-    if (!g_jar) ne_jar_reload();
+    /* Scratch jar = locked snapshot of the live jar; everything from here on
+     * touches scratch only, so no lock is held across the HTTP call. */
+    ne_jar *scratch = jar_snapshot();
 
     const char *os = "ios";
     const char *appver_extra = NULL;
@@ -306,10 +363,6 @@ static ne_resp *post_common(const char *orig_url, const char *post_url,
     const char *appver = appver_extra ? appver_extra
                       : (strcmp(os, "pc") != 0 ? "9.0.65" : "");
 
-    ne_jar *scratch = ne_jar_new();
-    char *ch = ne_jar_cookie_header(g_jar);
-    ne_jar_merge_cookie_str(scratch, ch);
-    free(ch);
     for (size_t i = 0; extra_cookies && extra_cookies[2 * i]; i++)
         if (extra_cookies[2 * i + 1])
             ne_jar_set(scratch, extra_cookies[2 * i], extra_cookies[2 * i + 1]);
@@ -338,11 +391,18 @@ static ne_resp *post_common(const char *orig_url, const char *post_url,
 
 ne_resp *ne_create_weapi(const char *url, jmap *data,
                          const char *const *extra_cookies) {
-    if (!g_jar) ne_jar_reload();
-
-    /* csrf_token from jar __csrf, injected pre-encryption (weapi branch) */
-    const char *csrf = ne_jar_get(g_jar, "__csrf");
-    jmap_put(data, "csrf_token", csrf ? csrf : "");
+    /* csrf_token from jar __csrf, injected pre-encryption (weapi branch).
+     * Copied out under lock — jmap_put strdup's it immediately, but we must
+     * not hold the pointer into the jar across the request. */
+    char csrf[128];
+    jar_lock();
+    if (!g_jar) init_jar_locked();
+    {
+        const char *v = ne_jar_get(g_jar, "__csrf");
+        snprintf(csrf, sizeof csrf, "%s", v ? v : "");
+    }
+    jar_unlock();
+    jmap_put(data, "csrf_token", csrf);
 
     ne_weapi_result enc;
     if (ne_weapi(data, &enc) != 0) {
@@ -365,10 +425,15 @@ ne_resp *ne_create_weapi(const char *url, jmap *data,
  * injection (no os/appver/NMTID), clean web request like request.go's
  * NewRequest path. */
 ne_resp *ne_create_weapi_clean(const char *url, jmap *data) {
-    if (!g_jar) ne_jar_reload();
-
-    const char *csrf = ne_jar_get(g_jar, "__csrf");
-    jmap_put(data, "csrf_token", csrf ? csrf : "");
+    char csrf[128];
+    jar_lock();
+    if (!g_jar) init_jar_locked();
+    {
+        const char *v = ne_jar_get(g_jar, "__csrf");
+        snprintf(csrf, sizeof csrf, "%s", v ? v : "");
+    }
+    jar_unlock();
+    jmap_put(data, "csrf_token", csrf);
 
     ne_weapi_result enc;
     if (ne_weapi(data, &enc) != 0) {
@@ -395,8 +460,6 @@ static const char *UA_LINUX =
 
 ne_resp *ne_call_linuxapi(const char *url, jmap *data,
                           const char *const *extra_cookies) {
-    if (!g_jar) ne_jar_reload();
-
     char *api_url = ne_rewrite_api_segment(url, "/api/");
 
     jmap *outer = jmap_new();
@@ -433,16 +496,19 @@ static const char *jar_or(const ne_jar *j, const char *name,
 }
 
 ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
-    if (!g_jar) ne_jar_reload();
+    /* Locked snapshot: every pointer read here points into `snap`, our own
+     * copy, so the extras kept alive across post_common() (which strdup's them
+     * into its scratch) cannot dangle even if another thread writes g_jar. */
+    ne_jar *snap = jar_snapshot();
 
     /* CookieValueByName(options.Cookies, name, fallback) — options.Cookies
      * for eapi is just the jar (no extras in any current service) */
-    const char *os = jar_or(g_jar, "os", "ios");
-    const char *appver = jar_or(g_jar, "appver",
+    const char *os = jar_or(snap, "os", "ios");
+    const char *appver = jar_or(snap, "appver",
                                 strcmp(os, "pc") != 0 ? "9.0.65" : "");
 
     char buildver[32];
-    snprintf(buildver, sizeof buildver, "%s", jar_or(g_jar, "buildver", ""));
+    snprintf(buildver, sizeof buildver, "%s", jar_or(snap, "buildver", ""));
     if (!buildver[0])
         snprintf(buildver, sizeof buildver, "%lld",
                  (long long)(ne_now_ms() / 1000));
@@ -452,24 +518,24 @@ ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
              (long long)(ne_now_ms() / 1000) * 1000, ne_rand_below(1000));
 
     char *device_id = NULL;
-    const char *dv = ne_jar_get(g_jar, "deviceId");
+    const char *dv = ne_jar_get(snap, "deviceId");
     if (!dv || !*dv) device_id = ne_random_device_id();
     const char *device_id_v = (dv && *dv) ? dv : device_id;
 
-    const char *mu = ne_jar_get(g_jar, "MUSIC_U");
-    const char *ma = ne_jar_get(g_jar, "MUSIC_A");
+    const char *mu = ne_jar_get(snap, "MUSIC_U");
+    const char *ma = ne_jar_get(snap, "MUSIC_A");
 
     jmap *header = jmap_new();
-    jmap_put(header, "osver", jar_or(g_jar, "osver", "17.4.1"));
+    jmap_put(header, "osver", jar_or(snap, "osver", "17.4.1"));
     jmap_put(header, "deviceId", device_id_v);
     jmap_put(header, "appver", appver);
-    jmap_put(header, "versioncode", jar_or(g_jar, "versioncode", "140"));
-    jmap_put(header, "mobilename", jar_or(g_jar, "mobilename", ""));
+    jmap_put(header, "versioncode", jar_or(snap, "versioncode", "140"));
+    jmap_put(header, "mobilename", jar_or(snap, "mobilename", ""));
     jmap_put(header, "buildver", buildver);
-    jmap_put(header, "resolution", jar_or(g_jar, "resolution", "1920x1080"));
-    jmap_put(header, "__csrf", jar_or(g_jar, "__csrf", ""));
+    jmap_put(header, "resolution", jar_or(snap, "resolution", "1920x1080"));
+    jmap_put(header, "__csrf", jar_or(snap, "__csrf", ""));
     jmap_put(header, "os", os);
-    jmap_put(header, "channel", jar_or(g_jar, "channel", ""));
+    jmap_put(header, "channel", jar_or(snap, "channel", ""));
     jmap_put(header, "requestId", request_id);
     if (mu && *mu) jmap_put(header, "MUSIC_U", mu);
     if (ma && *ma) jmap_put(header, "MUSIC_A", ma);
@@ -477,6 +543,7 @@ ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
 
     char *params = ne_eapi(eapi_path, data);
     if (!params) {
+        ne_jar_free(snap);
         free(device_id);
         ne_resp *r = ne_xmalloc(sizeof(ne_resp));
         r->code = 520; r->body = ne_xstrdup("encode failed");
@@ -492,36 +559,40 @@ ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
      * SetCookies them after the options.Cookies loop) */
     const char *extras[32];
     int n = 0;
-    extras[n++] = "osver";      extras[n++] = jar_or(g_jar, "osver", "17.4.1");
+    extras[n++] = "osver";      extras[n++] = jar_or(snap, "osver", "17.4.1");
     extras[n++] = "deviceId";   extras[n++] = device_id_v;
     extras[n++] = "appver";     extras[n++] = appver;
-    extras[n++] = "versioncode";extras[n++] = jar_or(g_jar, "versioncode", "140");
-    extras[n++] = "mobilename"; extras[n++] = jar_or(g_jar, "mobilename", "");
+    extras[n++] = "versioncode";extras[n++] = jar_or(snap, "versioncode", "140");
+    extras[n++] = "mobilename"; extras[n++] = jar_or(snap, "mobilename", "");
     extras[n++] = "buildver";   extras[n++] = buildver;
-    extras[n++] = "resolution"; extras[n++] = jar_or(g_jar, "resolution", "1920x1080");
-    extras[n++] = "__csrf";     extras[n++] = jar_or(g_jar, "__csrf", "");
+    extras[n++] = "resolution"; extras[n++] = jar_or(snap, "resolution", "1920x1080");
+    extras[n++] = "__csrf";     extras[n++] = jar_or(snap, "__csrf", "");
     extras[n++] = "os";         extras[n++] = os;
-    extras[n++] = "channel";    extras[n++] = jar_or(g_jar, "channel", "");
+    extras[n++] = "channel";    extras[n++] = jar_or(snap, "channel", "");
     extras[n++] = "requestId";  extras[n++] = request_id;
     if (mu && *mu) { extras[n++] = "MUSIC_U"; extras[n++] = mu; }
     if (ma && *ma) { extras[n++] = "MUSIC_A"; extras[n++] = ma; }
     extras[n] = NULL;
 
     ne_resp *r = post_common(url, final_url, form, choose_ua(), extras, 0);
+    ne_jar_free(snap);
     free(form); free(final_url); free(params); free(device_id);
     return r;
 }
 
 void ne_apply_request_strategy(void) {
-    if (!g_jar) ne_jar_reload();
+    jar_lock();
+    if (!g_jar) init_jar_locked();
     /* os=pc + fixed fake NMTID — filterJar keeps the fake value off disk but
      * the jar-in-memory carries it, exactly like the Go process */
     ne_jar_set(g_jar, "os", "pc");
     ne_jar_set(g_jar, "NMTID", "some_random_id_from_strategy");
+    jar_unlock();
 }
 
 char *ne_generate_chain_id(void) {
-    if (!g_jar) ne_jar_reload();
+    jar_lock();
+    if (!g_jar) init_jar_locked();
     const char *sd = ne_jar_get(g_jar, "sDeviceId");
     char *id;
     if (sd) {
@@ -532,6 +603,7 @@ char *ne_generate_chain_id(void) {
         for (int i = 0; i < 52; i++) id[i] = hexchars[ne_rand_below(16)];
         id[52] = '\0';
     }
+    jar_unlock();
     char *out = ne_xmalloc(64 + strlen(id));
     snprintf(out, 64 + strlen(id), "v1_%s_web_login_%lld", id,
              (long long)ne_now_ms());
@@ -539,8 +611,28 @@ char *ne_generate_chain_id(void) {
     return out;
 }
 
-/* global jar accessor for the CLI (persist on exit) */
+/* global jar accessor for the CLI (persist on exit). Returns the live jar
+ * under lock; callers on the CLI use it single-threaded, and the returned
+ * handle is only valid while no other request runs — safe for the CLI's
+ * end-of-process persist. */
 ne_jar *ne_global_jar(void) {
-    if (!g_jar) ne_jar_reload();
-    return g_jar;
+    jar_lock();
+    if (!g_jar) init_jar_locked();
+    ne_jar *jar = g_jar;
+    jar_unlock();
+    return jar;
+}
+
+/* Thread-safe merge of a browser-exported cookie string into the global jar
+ * plus persist to the cookie file (used by the Android JNI importCookies path;
+ * unlike raw ne_global_jar, safe to call concurrently with in-flight
+ * requests). */
+void ne_jar_import_cookies(const char *cookie_str) {
+    if (!cookie_str || !*cookie_str) return;
+    jar_lock();
+    if (!g_jar) init_jar_locked();
+    ne_jar_merge_cookie_str(g_jar, cookie_str);
+    const char *path = g_cookie_path;
+    if (path && *path) ne_jar_save_file(g_jar, path);
+    jar_unlock();
 }

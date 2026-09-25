@@ -6,14 +6,15 @@
 /* Request kernel -- mirrors util.CallWeapi / util.CreateRequest (v1.6.0).
  * One global jar per process, persisted by the CLI on exit.
  *
- * THREAD CONTRACT: this layer is process-global, single-threaded by design
- * (one active caller at a time): the global jar (ne_global_jar and the
- * ne_jar_ accessors), the optional cookie file, the installed API base and
- * the request transport are all shared, unsynchronized state. A multi-threaded
- * host (e.g. Android via JNI) MUST NOT issue concurrent request-kernel calls
- * against the same jar; serialize them (single dispatcher thread/queue, or an
- * external mutex guarding every call). This matches the Go process's
- * single-threaded operation. */
+ * THREAD CONTRACT: the global cookie jar is guarded by an internal mutex
+ * (see request.c g_jar_lock). Reformulating a cookie header from the jar, a
+ * write back of the live jar, or a fresh request snapshot each take the lock,
+ * and HTTP I/O never holds it — so concurrent request-kernel calls from
+ * multiple threads (e.g. Android via JNI or a GUI host) are safe and run in
+ * parallel. The one remaining caveat is ne_global_jar(), which returns the
+ * LIVE handle for the CLI's end-of-process persist; single-threaded hosts
+ * (the CLI) may use it, but a multi-threaded host must not treat that handle
+ * as safe after the call returns. Matches netease/request.h (v1.6.0). */
 
 typedef struct {
     double code;     /* API business code ("code" field), 200 fallback,
@@ -36,6 +37,10 @@ void ne_jar_reload(void);
 /* opaque global jar handle (for ne_jar_save_file on exit) */
 struct ne_jar;
 struct ne_jar *ne_global_jar(void);
+/* thread-safe merge of an exported cookie string into the global jar + persist
+ * (Android importCookies); unlike ne_global_jar, safe alongside in-flight
+ * requests on a multi-threaded host. */
+void ne_jar_import_cookies(const char *cookie_str);
 
 /* API base URL. Default "https://music.163.com". Priority: explicit
  * ne_set_api_base() (highest) -> NE_API_BASE env (CLI/test hook) -> default.
