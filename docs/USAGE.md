@@ -32,7 +32,7 @@
 | 通道 | 重写目标 | 加密 | 现状 |
 |---|---|---|---|
 | weapi | `/weapi/` | 双层 AES-CBC + RSA 加密随机 key | 主力通道 |
-| linuxapi | `/api/`（内层） | 单层 AES-ECB，POST `/api/linux/forward` | ⚠️ 上游已弃用，仅 lyric / song_url_old 在用（见 §8） |
+| linuxapi | `/api/`（内层） | 单层 AES-ECB，POST `/api/linux/forward` | ⚠️ 上游已弃用，2026-09 起**无服务在用**（仅保留通道代码，见 §8） |
 | eapi | `/eapi/` | AES-ECB + header 反欺诈对象 | 仅 playlist_update_name 在用 |
 
 ## 2. 构建
@@ -166,7 +166,7 @@ typedef struct {
 | `ne_record_recent(limit)` | `/weapi/play-record/song/list` | W | | ✓ |
 | `ne_recommend_resource(void)` | `/weapi/v1/discovery/recommend/resource` | W | | ✓ |
 | `ne_song_url_v1(id,level)` | `/weapi/song/enhance/player/url/v1` | **W!** | level 空 → "higher"；"sky" 加 immerseType=c51；encodeType 恒 "flac" | ✗（匿名限低码率） |
-| `ne_song_url_old(id,br)` | linuxapi 信封内 `/api/song/enhance/player/url` | **L** | | ✗ |
+| `ne_song_url_old(id,br)` | `/weapi/song/enhance/player/url` | W | 2026-09 起（原 linuxapi，与 check_music 同端点同参数） | ✗ |
 | `ne_song_download_url(id,level)` | `/weapi/song/enhance/download/url/v1` | **W!** | | ✓（已购） |
 | `ne_song_music_quality(id)` | `/weapi/song/music/detail/get` | W | | ✓ |
 | `ne_song_purchased(limit,offset)` | `/weapi/single/mybought/song/list` | W | | ✓ |
@@ -175,7 +175,7 @@ typedef struct {
 | `ne_song_detail(ids_csv)` | `/weapi/v3/song/detail` | W | `c=[{"id":…},…]` | ✗ |
 | `ne_playlist_detail(id,s)` | `/weapi/v6/playlist/detail` | W | n=100000；s 空 → "8"（订阅者数）。2026-09 起（原 linuxapi+v3） | ✗ |
 | `ne_user_playlist(uid,limit,offset)` | `/weapi/user/playlist` | W | 空 → 30/0 | ✗ |
-| `ne_lyric(id)` | linuxapi 信封内 `/api/song/lyric` | **L** | lv/kv/tv=-1 | ✗ |
+| `ne_lyric(id)` | `/weapi/song/lyric` | W | lv/kv/tv/rv=-1，_nmclfl=1；2026-09 起（原 linuxapi） | ✗ |
 | `ne_toplist_detail(void)` | `/weapi/toplist/detail` | W | | ✗ |
 | `ne_recommend_songs(void)` | `/weapi/v3/discovery/recommend/songs` | W | cookie os=ios | ✓ |
 | `ne_recommend_playlists(limit)` | `/weapi/personalized/playlist` | W | | ✗ |

@@ -311,12 +311,17 @@ C 原实现为：light → `█`（U+2588，全块，错误）。
 - 重试复用同一份已加密 form（重发相同密文）——与 Meting-API「-460 重试 5 次、间隔 100ms」
   思路一致，网关偶发限流可自愈；写操作场景建议保持关闭（可能重复生效）。
 - 随机国内 IP 段表刻意排除 58-61/202-211（混有海外段），避免"看似国内"反露马脚。
+- **通道迁移的内存所有权**：`ne_call_linuxapi` 会接管并释放传入的 `jmap *data`，
+  而 `ne_create_weapi` / `ne_call_weapi` **不接管**——迁移时须显式 `jmap_free(data)`。
+  2026-09 weapi 迁移时 `ne_lyric` / `ne_song_url_old` 漏释放（lyric 是 nume 高频路径），
+  已修于 dbbb3fa；`ne_playlist_detail` 当时已正确释放。
 
 ### 上游对照（重要差异）
 - **NMTID**：api-enhanced 2026-08-24 修复——固定假 NMTID 会触发风控，真值应由服务端
-  在"不带 NMTID 的 eapi 请求"的 Set-Cookie 下发（保底 `00O`+38hex）。libnetease 沿用
-  Go v1.6.0 的 `some_random_id_from_strategy`（filterJar 不上线、仅 os=pc 生效）。若 eapi
-  场景被 -462 缠住，宿主可自行向 jar 注入服务端下发的 `NMTID` cookie 覆盖。
+  在"不带 NMTID 的 eapi 请求"的 Set-Cookie 下发（保底 `00O`+38hex）。libnetease 2026-09 起
+  已对齐该思路的一半：`ne_apply_request_strategy` 仅在 jar 无 NMTID/空值时才注入
+  `some_random_id_from_strategy`（filterJar 不上盘、仅 os=pc 生效），jar 中服务端下发的真值
+  优先复用；**未移植**其"主动 eapi 探测 + 采集"（缺省仍是假值）。
 - **易盾反作弊 token**（`X-antiCheatToken` v2/v3）：api-enhanced 用 jsdom 跑 Watchman SDK
   获取，仅注册/验证码类接口需要，libnetease 无此功能，暂不实现。
 - **游客 MUSIC_A / xeapi**：上游有，libnetease 当前接口用不到，仅文档记录。

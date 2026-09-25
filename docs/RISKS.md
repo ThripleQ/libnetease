@@ -34,7 +34,7 @@
 | 层 | 技术 | 状态 |
 |---|---|---|
 | 第一层 HTTP 伪装 | UA 轮换 / 随机 IP 头 / 限速退避 | **libnetease 已实现**（本次加固） |
-| 第二层 协议反作弊 | 易盾 checkToken（已扩到 weapi，2026-07）、NMTID 服务端下发（2026-08）、xeapi 动态密钥 | api-enhanced 生态进行中 |
+| 第二层 协议反作弊 | 易盾 checkToken（已扩到 weapi，2026-07）、NMTID 服务端下发（2026-08）、xeapi 动态密钥 | api-enhanced 生态进行中；libnetease 2026-09 起已复用 jar 中服务端下发的 NMTID |
 | 第三层 TLS 指纹 | JA3/JA4 伪装：标准 libcurl 的 TLS Client Hello 与浏览器差异巨大，防 bot 平台按此识别 curl | **libnetease 未做**（见 §七 TLS 指纹指南） |
 | 第四层 身份与网络 | 扫码/Cookie 借真信任；住宅/移动代理池（数据中心 IP 在 TLS 之外被单独识别） | 全体上游共识 / 网络基建 |
 
@@ -129,7 +129,7 @@
 |---|---|---|---|
 | 国内 IP 双头注入 | api-enhanced/Meting：`X-Real-IP`+`X-Forwarded-For` | 原无；本次新增 | ✅ 已实现（`NE_REAL_IP`/`NE_RANDOM_CN_IP`） |
 | 随机中国 IP 生成 | api-enhanced 4147 CIDR 权重随机；Meting 内置城市段 | 原无 | ✅ 已实现（`ne_random_cn_ip()`） |
-| NMTID 由服务端下发 | api-enhanced 2026-08-24 修复：不带 NMTID 请求 eapi 接口，从 Set-Cookie 采集真 NMTID，保底 `00O`+随机；**固定假值会触发风控** | Go v1.6.0 行为：固定 `some_random_id_from_strategy`（os=pc 策略），且 filterJar 不上线 | ⚠️ 移植纪律保留原行为；eapi 高频/被 462 时建议宿主自行注入 `NMTID` cookie（见 §7 建议） |
+| NMTID 由服务端下发 | api-enhanced 2026-08-24 修复：不带 NMTID 请求 eapi 接口，从 Set-Cookie 采集真 NMTID，保底 `00O`+随机；**固定假值会触发风控** | Go v1.6.0 行为：固定 `some_random_id_from_strategy`（os=pc 策略） | ✅ 2026-09 起：Strategy 仅在 jar 无 NMTID/空值时才注入假值（且 filterJar 不上盘），jar 中服务端下发的真值优先复用，对齐 api-enhanced。**未移植**其"主动 eapi 探测采集"（缺省仍为假值），如需可参考上游 |
 | 易盾反作弊 token（注册/验证码接口） | api-enhanced：jsdom 跑 Watchman SDK 取 `X-antiCheatToken`（v2/v3） | 无注册/验证码功能 | 📋 文档记录，如需扩展注册功能再实现 |
 | 游客匿名 token（MUSIC_A） | api-enhanced/Meting：未登录注入游客 `MUSIC_A` | 无 | 📋 文档记录 |
 | xeapi 第三套加密（2024+ 新增） | api-enhanced 已支持（xeapiKey 独立文件） | 无 | 📋 文档记录，libnetease 当前接口用不到 |
