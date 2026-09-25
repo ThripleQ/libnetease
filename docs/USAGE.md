@@ -239,9 +239,8 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
 
 ## 8. 已知限制与风险（2026-09 审计，对照 api-enhanced 现行实现）
 
-1. **linuxapi 通道**（仅剩 lyric / song_url_old）—— api-enhanced 生产模块零使用；playlist_detail 已平移 weapi+v6。若 `/api/linux/forward` 被下线，这两个最先断。缓解：lyric 平移 weapi 并补 `rv:-1`、`_nmclfl:1` 字段。
-2. **NMTID**：复刻 Go 的假值行为（内存中、不落盘）；api-enhanced 改为缓存服务端下发真值并在 eapi 请求复用。高风控环境宿主可通过 jar 注入真值覆盖。
-3. **song_url_v1**：走 weapi，当前有效；api-enhanced 另有 xeapi（会话密钥协商）进阶方案，高音质场景可关注。
-4. **协议正确性**：四把密钥、RSA 公钥、URL 重写、JSON 转义经向量级测试 + 差分双跑验证（52 用例）。
+1. **通道现状**：linuxapi 已全部移出请求路径（playlist_detail → weapi+v6，lyric/song_url_old → weapi）；song_url_v1 仍走 weapi，api-enhanced 另有 xeapi（会话密钥协商）进阶方案，高音质场景可关注。
+2. **NMTID**：反欺诈策略仅在 jar 无 NMTID 时注入假值（不落盘）；服务端下发的真值优先复用，对齐 api-enhanced 2026-08 行为。
+3. **协议正确性**：四把密钥、RSA 公钥、URL 重写、JSON 转义经向量级测试 + 差分双跑验证（52 用例）。
 
-服务行为与 `services.h` 注释有出入时**以 services.c 为准**（如 `ne_login_refresh`/`ne_record_recent` 注释仍写 CallWeapi，实现为 create_weapi）。
+服务行为与 `services.h` 注释有出入时**以 services.c 为准**。
