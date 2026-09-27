@@ -169,27 +169,22 @@ void ne_resp_free(ne_resp *r) {
 }
 
 /* parse "code" as a double from a JSON body (jsonparser.GetFloat semantics:
- * missing field => 200). Extremely small scanner — the code field sits at
- * the top level; we find '"code"' followed by ':' and a number. */
+ * missing field => 200). The code field is read from the TOP LEVEL of the
+ * object JSON — a naive first-`"code"` scan is wrong for responses that
+ * embed a nested `"code":0` (e.g. per-song privilege data in
+ * weapi/v1/artist/{id} and weapi/v1/artist/songs) before the real top-level
+ * `"code":200`. Parse the tree so only the root's code counts; anything
+ * unparseable keeps the 200 fallback. */
 static double parse_code(const char *body) {
     if (!body) return 200;
-    const char *p = body;
-    while ((p = strstr(p, "\"code\"")) != NULL) {
-        /* ensure it is at top level: preceded by '{' or ',' with only
-         * whitespace/quotes between would be complex; netease always has
-         * top-level code — accept first occurrence, matching jsonparser. */
-        p += 6;
-        while (*p == ' ' || *p == '\t') p++;
-        if (*p == ':') {
-            p++;
-            while (*p == ' ' || *p == '\t') p++;
-            char *end;
-            double v = strtod(p, &end);
-            if (end != p) return v;
-        }
-        p += 1;
+    ne_jval *root = ne_jval_parse(body);
+    double v = 200;
+    if (root && ne_jval_type(root) == NE_JV_OBJ) {
+        ne_jval *code = ne_jval_get(root, "code");
+        if (code && ne_jval_type(code) == NE_JV_NUM) v = ne_jval_num(code);
     }
-    return 200;
+    ne_jval_free(root);
+    return v;
 }
 
 static ne_resp *finish(ne_http_resp *h) {

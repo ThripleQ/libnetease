@@ -266,6 +266,39 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "playlist-delete") == 0) {
         if (argc < 3) cli_die("usage: netease-cli playlist-delete <playlist_id>");
         rc = cli_envelope(ne_playlist_delete(argv[2]));
+    } else if (strcmp(cmd, "artist") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli artist <id>");
+        rc = cli_pass(ne_artist_detail(argv[2]));
+    } else if (strcmp(cmd, "artist-songs") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli artist-songs <id> [order] [limit] [offset]");
+        rc = cli_pass(ne_artist_songs(argv[2], argc > 5 ? argv[5] : NULL,
+                                      argc > 4 ? argv[4] : NULL,
+                                      argc > 3 ? argv[3] : NULL));
+    } else if (strcmp(cmd, "artist-albums") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli artist-albums <id> [limit] [offset]");
+        rc = cli_pass(ne_artist_albums(argv[2], argc > 3 ? argv[3] : NULL,
+                                       argc > 4 ? argv[4] : NULL));
+    } else if (strcmp(cmd, "artist-desc") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli artist-desc <id>");
+        rc = cli_pass(ne_artist_desc(argv[2]));
+    } else if (strcmp(cmd, "radio") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli radio <id>");
+        rc = cli_pass(ne_radio_detail(argv[2]));
+    } else if (strcmp(cmd, "radio-programs") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli radio-programs <radio_id> [limit] [offset] [asc]");
+        rc = cli_pass(ne_radio_programs(argv[2], argc > 3 ? argv[3] : NULL,
+                                        argc > 4 ? argv[4] : NULL,
+                                        argc > 5 ? argv[5] : NULL));
+    } else if (strcmp(cmd, "comments") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli comments <thread_id> [limit] [offset] [before]");
+        rc = cli_pass(ne_comments(argv[2], argc > 3 ? argv[3] : NULL,
+                                  argc > 4 ? argv[4] : NULL,
+                                  argc > 5 ? argv[5] : NULL));
+    } else if (strcmp(cmd, "comments-hot") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli comments-hot <thread_id> [limit] [offset] [before]");
+        rc = cli_pass(ne_comments_hot(argv[2], argc > 3 ? argv[3] : NULL,
+                                      argc > 4 ? argv[4] : NULL,
+                                      argc > 5 ? argv[5] : NULL));
     } else {
         fprintf(stderr, "unknown cmd: %s\n", cmd);
         rc = 1;

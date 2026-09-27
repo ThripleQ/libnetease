@@ -141,4 +141,52 @@ ne_resp *ne_login_cellphone_captcha(const char *phone, const char *captcha,
 /* LoginRefreshService — ApplyRequestStrategy + csrf from jar, weapi (create_weapi)
  * /weapi/login/token/refresh */
 ne_resp *ne_login_refresh(void);
+
+/* ── artist family ───────────────────────────────────────────────────── */
+
+/* ArtistDetailService — weapi/v1/artist/{id}: {artist, hotSongs, more}.
+ * One call yields the artist profile plus its top 50 hot songs. */
+ne_resp *ne_artist_detail(const char *id);
+
+/* ArtistSongsService — weapi/v1/artist/songs {id, offset, limit, order};
+ * order empty → "hot" (else "time"). Paged full song list. */
+ne_resp *ne_artist_songs(const char *id, const char *offset,
+                         const char *limit, const char *order);
+
+/* ArtistAlbumsService — weapi/artist/albums/{id} {limit, offset, total}:
+ * the artist's albums. total empty → "true". */
+ne_resp *ne_artist_albums(const char *id, const char *limit,
+                          const char *offset);
+
+/* ArtistDescService — weapi/artist/introduction {id}: {introduction:[...],
+ * briefDesc, ...}. */
+ne_resp *ne_artist_desc(const char *id);
+
+/* ── podcast / radio family ──────────────────────────────────────────── */
+
+/* DjRadioDetailService — weapi/djradio/get {id} (v1; v2 returns 404). */
+ne_resp *ne_radio_detail(const char *id);
+
+/* DjProgramListService — weapi/dj/program/byradio {radioId, limit, offset,
+ * asc} with NUMERIC radioId/limit/offset and a JSON boolean asc (string
+ * values are rejected with code 400). Paged program list of a radio. */
+ne_resp *ne_radio_programs(const char *radio_id, const char *limit,
+                           const char *offset, const char *asc);
+
+/* ── comment family ──────────────────────────────────────────────────── */
+
+/* CommentService — weapi/v1/resource/comments/{thread_id} {rid, offset,
+ * limit, beforeTime}. thread_id is the resource thread id:
+ *   song     R_SO_4_<id>
+ *   album    R_AL_3_<id>
+ *   playlist A_PL_0_<id>   (R_SQ_2_ returns empty)
+ *   program  R_VI_62_<id>  (server currently returns empty for these)
+ * beforeTime empty → "0". */
+ne_resp *ne_comments(const char *thread_id, const char *limit,
+                     const char *offset, const char *before_time);
+
+/* CommentHotService — weapi/v1/resource/hotcomments/{thread_id}, same data
+ * shape; the "hot" comments tab of the same thread. */
+ne_resp *ne_comments_hot(const char *thread_id, const char *limit,
+                         const char *offset, const char *before_time);
 #endif

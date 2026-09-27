@@ -578,3 +578,122 @@ ne_resp *ne_login_refresh(void) {
     jmap_free(data);
     return r;
 }
+
+/* ══ artist family ════════════════════════════════════════════════════ */
+
+/* artist_detail — weapi/v1/artist/{id}: {artist, hotSongs, more}. The v1
+ * payload embeds per-song privilege objects carrying a nested "code":0;
+ * the kernel's top-level code scan is immune (see parse_code). */
+ne_resp *ne_artist_detail(const char *id) {
+    jmap *data = jmap_new();
+    jmap_put(data, "id", id);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/v1/artist/%s", ne_api_base(), id);
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* artist_songs — weapi/v1/artist/songs {id, offset, limit, order} */
+ne_resp *ne_artist_songs(const char *id, const char *offset,
+                         const char *limit, const char *order) {
+    jmap *data = jmap_new();
+    jmap_put(data, "id", id);
+    jmap_put(data, "offset", offset && *offset ? offset : "0");
+    jmap_put(data, "limit", limit && *limit ? limit : "50");
+    jmap_put(data, "order", order && *order ? order : "hot");
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/v1/artist/songs", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* artist_albums — weapi/artist/albums/{id} {limit, offset, total} */
+ne_resp *ne_artist_albums(const char *id, const char *limit,
+                          const char *offset) {
+    jmap *data = jmap_new();
+    jmap_put(data, "limit", limit && *limit ? limit : "50");
+    jmap_put(data, "offset", offset && *offset ? offset : "0");
+    jmap_put(data, "total", "true");
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/artist/albums/%s", ne_api_base(), id);
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* artist_desc — weapi/artist/introduction {id} */
+ne_resp *ne_artist_desc(const char *id) {
+    jmap *data = jmap_new();
+    jmap_put(data, "id", id);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/artist/introduction", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* ══ podcast / radio family ═══════════════════════════════════════════ */
+
+/* radio_detail — weapi/djradio/get {id}. The /v2 path 404s; v1 is live. */
+ne_resp *ne_radio_detail(const char *id) {
+    jmap *data = jmap_new();
+    jmap_put(data, "id", id);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/djradio/get", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* radio_programs — weapi/dj/program/byradio. radioId/limit/offset must be
+ * JSON numbers and asc a JSON boolean; string forms are rejected (code 400). */
+ne_resp *ne_radio_programs(const char *radio_id, const char *limit,
+                           const char *offset, const char *asc) {
+    jmap *data = jmap_new();
+    jmap_put_int(data, "radioId", strtol(radio_id, NULL, 10));
+    jmap_put_int(data, "limit", (limit && *limit) ? strtol(limit, NULL, 10) : 50);
+    jmap_put_int(data, "offset", (offset && *offset) ? strtol(offset, NULL, 10) : 0);
+    jmap_put_bool(data, "asc", asc && strcmp(asc, "true") == 0);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/dj/program/byradio", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* ══ comment family ═══════════════════════════════════════════════════ */
+
+/* comments — weapi/v1/resource/comments/{thread_id} {rid, limit, offset,
+ * beforeTime}. `rid` mirrors the path thread id. */
+ne_resp *ne_comments(const char *thread_id, const char *limit,
+                     const char *offset, const char *before_time) {
+    jmap *data = jmap_new();
+    jmap_put(data, "rid", thread_id);
+    jmap_put(data, "limit", limit && *limit ? limit : "20");
+    jmap_put(data, "offset", offset && *offset ? offset : "0");
+    jmap_put(data, "beforeTime", before_time && *before_time ? before_time : "0");
+    char url[768];
+    snprintf(url, sizeof url, "%s/weapi/v1/resource/comments/%s",
+             ne_api_base(), thread_id);
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* comments_hot — weapi/v1/resource/hotcomments/{thread_id}, same data */
+ne_resp *ne_comments_hot(const char *thread_id, const char *limit,
+                         const char *offset, const char *before_time) {
+    jmap *data = jmap_new();
+    jmap_put(data, "rid", thread_id);
+    jmap_put(data, "limit", limit && *limit ? limit : "20");
+    jmap_put(data, "offset", offset && *offset ? offset : "0");
+    jmap_put(data, "beforeTime", before_time && *before_time ? before_time : "0");
+    char url[768];
+    snprintf(url, sizeof url, "%s/weapi/v1/resource/hotcomments/%s",
+             ne_api_base(), thread_id);
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
