@@ -40,6 +40,12 @@ ne_jval *ne_jval_parse(const char *text);
  * feeds main.go's "parse account failed: %v" stderr line */
 const char *ne_jval_last_error(void);
 
+/* 流式顶层 "code" 提取（零节点分配，供 request.c 的 code 校验走捷径）：
+ * 语义 = parse 后取根对象第一个 "code" 键且值为数字 → 1 并写 *out；
+ * 其余（非法 JSON / 顶层非对象 / 无 code / 首个 code 非数字 / 尾随垃圾）
+ * → 0。与树路径的唯一理论偏差：键名 "\u0063ode"（转义拼写）不匹配。 */
+int ne_jval_scan_top_code(const char *text, double *out);
+
 ne_jv_type ne_jval_type(const ne_jval *v);
 
 /* object/array access — NULL when absent or wrong shape */

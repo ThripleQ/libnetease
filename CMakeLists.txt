@@ -86,6 +86,15 @@ add_executable(test_crypto tests/test_crypto.c)
 target_link_libraries(test_crypto PRIVATE netease)
 add_test(NAME crypto COMMAND test_crypto)
 
+# 流式 code 扫描与树路径的语义等价回归（随机 fuzz + 固定边界 + 深度 sweep）
+add_executable(test_scan_equiv tests/test_scan_equiv.c)
+target_link_libraries(test_scan_equiv PRIVATE netease)
+add_test(NAME scan_equiv COMMAND test_scan_equiv)
+
+add_executable(test_scan_depth tests/test_scan_depth.c)
+target_link_libraries(test_scan_depth PRIVATE netease)
+add_test(NAME scan_depth COMMAND test_scan_depth)
+
 add_executable(test_jval tests/test_jval.c)
 target_link_libraries(test_jval PRIVATE netease)
 add_test(NAME jval COMMAND test_jval)

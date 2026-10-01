@@ -177,14 +177,12 @@ void ne_resp_free(ne_resp *r) {
  * unparseable keeps the 200 fallback. */
 static double parse_code(const char *body) {
     if (!body) return 200;
-    ne_jval *root = ne_jval_parse(body);
-    double v = 200;
-    if (root && ne_jval_type(root) == NE_JV_OBJ) {
-        ne_jval *code = ne_jval_get(root, "code");
-        if (code && ne_jval_type(code) == NE_JV_NUM) v = ne_jval_num(code);
-    }
-    ne_jval_free(root);
-    return v;
+    /* 2026-10 性能修正：原实现每次全树解析（358KB 真实响应 ~11ms，节点
+     * 逐 malloc）只为读顶层 code。换成等价的流式扫描（jval.c，零分配），
+     * 语义严格对齐：非法/无 code/非数字 → 200 兜底不变。 */
+    double v;
+    if (ne_jval_scan_top_code(body, &v)) return v;
+    return 200;
 }
 
 static ne_resp *finish(ne_http_resp *h) {
@@ -262,16 +260,16 @@ ne_resp *ne_call_weapi(const char *api, const jmap *data) {
         r->code = 0;
         return r;
     }
-    ne_jval *root = ne_jval_parse(r->body);
-    ne_jval *code = root && ne_jval_type(root) == NE_JV_OBJ
-                  ? ne_jval_get(root, "code") : NULL;
-    if (code && ne_jval_type(code) == NE_JV_NUM) {
-        r->code = ne_jval_num(code);
+    /* 2026-10 性能修正：原实现把 body 再全树解析一遍（finish 里 parse_code
+     * 已经解析过同一 body——每大响应两次建树纯浪费）。改用流式扫描做
+     * CallWeapi 的校验：语义不变（数字 code → code；否则 code=0, err=2）。 */
+    double code;
+    if (ne_jval_scan_top_code(r->body, &code)) {
+        r->code = code;
     } else {
         r->code = 0;
         r->err = 2;
     }
-    ne_jval_free(root);
     return r;
 }
 

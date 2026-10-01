@@ -570,3 +570,191 @@ char *ne_jval_marshal(const ne_jval *v) {
     marshal_rec(v, &b);
     return sb_finish(&b);
 }
+
+/* ── 流式顶层 "code" 提取（性能路径，2026-10） ────────────────────
+ * 语义对齐 parse_code 的树路径：ne_jval_parse → 根为 OBJ → get("code")
+ * （第一个匹配键）→ 值为 NUM → 该数值；其余一切（非法 JSON、顶层非对象、
+ * 无 code、第一个 code 非数字、尾随垃圾）→ 无 code。
+ * 背景：358KB 真实响应建全树 ~11ms（节点逐 malloc），本扫描 <1ms 且零
+ * 分配；request.c 的 finish/CallWeapi 校验各用一次 = 每请求省两次全树。
+ * 严格性与树解析一致：控制字符、字符串转义文法、数字文法、surrogate
+ * 配对、尾随垃圾全校验。已知唯一理论偏差：键名写作 "\u0063ode"（解码后
+ * 才是 "code"）时扫描不匹配——真实响应不出现，注释存档。 */
+typedef struct { const char *p; } sctx;
+
+static void s_ws(sctx *c) {
+    while (*c->p == ' ' || *c->p == '\t' || *c->p == '\n' || *c->p == '\r')
+        c->p++;
+}
+
+static int s_hexdigit(char ch) {
+    return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
+           (ch >= 'A' && ch <= 'F');
+}
+
+/* ON 开引号；成功时越过闭引号，失败 0。转义文法与 parse_string_raw 对齐
+ * （含 surrogate 配对校验，保证"解析失败→无 code"的判定两侧一致）。 */
+static int s_skip_string(sctx *c) {
+    c->p++;
+    for (;;) {
+        unsigned char ch = (unsigned char)*c->p;
+        if (ch == '"') { c->p++; return 1; }
+        if (ch == '\0') return 0;   /* 树语义：裸控制字符宽容接受，NUL=意外结束 */
+        if (ch == '\\') {
+            c->p++;
+            switch (*c->p) {
+            case '"': case '\\': case '/': case 'b': case 'f':
+            case 'n': case 'r': case 't':
+                c->p++; break;
+            case 'u': {
+                for (int i = 1; i <= 4; i++)
+                    if (!s_hexdigit(c->p[i])) return 0;
+                unsigned cp = 0;
+                for (int i = 1; i <= 4; i++)
+                    cp = cp * 16 + (unsigned)hex_digit(c->p[i]);
+                c->p += 5;
+                if (cp >= 0xD800 && cp <= 0xDBFF) {
+                    if (c->p[0] == '\\' && c->p[1] == 'u') {
+                        unsigned lo = 0; int ok = 1;
+                        for (int i = 2; i <= 5; i++)
+                            if (!s_hexdigit(c->p[i])) { ok = 0; break; }
+                        if (ok)
+                            for (int i = 2; i <= 5; i++)
+                                lo = lo * 16 + (unsigned)hex_digit(c->p[i]);
+                        if (ok && lo >= 0xDC00 && lo <= 0xDFFF) {
+                            c->p += 6;
+                            break;
+                        }
+                    }
+                    return 0;   /* lone high surrogate */
+                }
+                if (cp >= 0xDC00 && cp <= 0xDFFF) return 0; /* lone low */
+                break;
+            }
+            default: return 0;
+            }
+        } else {
+            c->p++;
+        }
+    }
+}
+
+/* 严格 JSON 数字文法；成功时 *start 指向词素起点。 */
+static int s_skip_number(sctx *c, const char **start) {
+    const char *s = c->p;
+    if (*c->p == '-') c->p++;
+    if (*c->p == '0') c->p++;
+    else if (*c->p >= '1' && *c->p <= '9') {
+        while (*c->p >= '0' && *c->p <= '9') c->p++;
+    } else return 0;
+    if (*c->p == '.') {
+        c->p++;
+        if (!(*c->p >= '0' && *c->p <= '9')) return 0;
+        while (*c->p >= '0' && *c->p <= '9') c->p++;
+    }
+    if (*c->p == 'e' || *c->p == 'E') {
+        c->p++;
+        if (*c->p == '+' || *c->p == '-') c->p++;
+        if (!(*c->p >= '0' && *c->p <= '9')) return 0;
+        while (*c->p >= '0' && *c->p <= '9') c->p++;
+    }
+    *start = s;
+    return 1;
+}
+
+static int s_skip_value(sctx *c, int depth);
+
+#define S_MAX_DEPTH 128   /* = NE_MAX_DEPTH：树路径深于此即失败 -> 无 code */
+
+static int s_skip_container(sctx *c, int depth, char open, char close) {
+    c->p++;
+    for (;;) {
+        s_ws(c);
+        if (*c->p == close) { c->p++; return 1; }
+        if (open == '{') {                      /* 对象：先键后冒号 */
+            if (*c->p != '"') return 0;
+            if (!s_skip_string(c)) return 0;
+            s_ws(c);
+            if (*c->p != ':') return 0;
+            c->p++;
+        }
+        if (!s_skip_value(c, depth + 1)) return 0;
+        s_ws(c);
+        if (*c->p == ',') { c->p++; continue; }
+        if (*c->p == close) { c->p++; return 1; }
+        return 0;
+    }
+}
+
+static int s_skip_value(sctx *c, int depth) {
+    if (depth >= S_MAX_DEPTH) return 0;   /* 树：parse_value 入口判 NE_MAX_DEPTH */
+    s_ws(c);
+    switch (*c->p) {
+    case '{': return s_skip_container(c, depth, '{', '}');
+    case '[': return s_skip_container(c, depth, '[', ']');
+    case '"': return s_skip_string(c);
+    case 't': return strncmp(c->p, "true", 4) == 0 ? (c->p += 4, 1) : 0;
+    case 'f': return strncmp(c->p, "false", 5) == 0 ? (c->p += 5, 1) : 0;
+    case 'n': return strncmp(c->p, "null", 4) == 0 ? (c->p += 4, 1) : 0;
+    default: {
+        const char *start;
+        return s_skip_number(c, &start);
+    }
+    }
+}
+
+int ne_jval_scan_top_code(const char *text, double *out) {
+    if (!text) return 0;
+    sctx c = { text };
+    s_ws(&c);
+    if (*c.p != '{') return 0;
+    c.p++;
+    for (;;) {
+        s_ws(&c);
+        if (*c.p == '}') { c.p++; break; }
+        if (*c.p != '"') return 0;
+        /* 原字节匹配 "code"（纯 ASCII 键无转义形式；"\u0063ode" 见文件头注释） */
+        if (strncmp(c.p + 1, "code\"", 5) == 0) {
+            c.p += 6;
+            s_ws(&c);
+            if (*c.p != ':') return 0;
+            c.p++;
+            s_ws(&c);
+            const char *start;
+            if (!(*c.p == '-' || (*c.p >= '0' && *c.p <= '9'))) return 0;
+            if (!s_skip_number(&c, &start)) return 0;
+            /* 剩余顶层成员仍需完整校验（含尾随垃圾），失败 = 整体无 code */
+            double v = strtod(start, NULL);
+            for (;;) {
+                s_ws(&c);
+                if (*c.p == '}') { c.p++; goto done; }
+                if (*c.p != ',') return 0;
+                c.p++;
+                s_ws(&c);
+                if (*c.p != '"') return 0;
+                if (!s_skip_string(&c)) return 0;
+                s_ws(&c);
+                if (*c.p != ':') return 0;
+                c.p++;
+                if (!s_skip_value(&c, 1)) return 0;
+            }
+        done:
+            s_ws(&c);
+            if (*c.p != '\0') return 0;    /* 尾随垃圾（Go Unmarshal 语义） */
+            *out = v;
+            return 1;
+        }
+        if (!s_skip_string(&c)) return 0;
+        s_ws(&c);
+        if (*c.p != ':') return 0;
+        c.p++;
+        if (!s_skip_value(&c, 1)) return 0;
+        s_ws(&c);
+        if (*c.p == ',') { c.p++; continue; }
+        if (*c.p == '}') { c.p++; break; }
+        return 0;
+    }
+    s_ws(&c);
+    if (*c.p != '\0') return 0;
+    return 0;
+}
