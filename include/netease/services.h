@@ -232,4 +232,18 @@ ne_resp *ne_playlist_catalogue(void);
  * 伤感 / 治愈…）返回该标签下的热门歌单，用来给「场景音乐」的标签卡配封面。 */
 ne_resp *ne_playlist_list(const char *cat, const char *limit,
                           const char *offset);
+
+/* HomepageBlockPageService — /api/homepage/block/page {refresh, cursor}，
+ * 移动端首页「发现」页的整条 block 流。**「雷达歌单」就在这里**：
+ *   data.blocks[].blockCode == "HOMEPAGE_BLOCK_MGC_PLAYLIST"
+ * 的 `creatives[]` 是一批官方雷达歌单（私人雷达 / 新歌雷达 / 会员雷达 /
+ * 乐迷雷达 / 宝藏雷达…，2026-10-04 探针实测稳定 6 张）；每张卡取
+ * `creativeId` = 歌单 id、`uiElement.mainTitle.title` = 名称、
+ * `uiElement.image.imageUrl` = 封面。
+ *
+ * 这是 weapi 侧**唯一**的雷达入口：任何路径里带 radar 字样的独立端点
+ * （/api/radar/... 等 7 个候选）全部 404，api-enhanced 439 个 module 里
+ * 也没有 radar —— 它只作为 block 流里的一个 block 存在，不单独暴露。
+ * refresh 非 0 = 强制刷新（服务端重新出卡）；cursor 首次传 "-1"。 */
+ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor);
 #endif

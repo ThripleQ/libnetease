@@ -809,3 +809,21 @@ ne_resp *ne_playlist_list(const char *cat, const char *limit,
     jmap_free(data);
     return r;
 }
+
+/* homepage_block_page.js — /api/homepage/block/page {refresh, cursor}，
+ * 移动端接口（首页「发现」页整条 block 流）→ cookie 附 os=ios。
+ *
+ * 「雷达歌单」区（HOMEPAGE_BLOCK_MGC_PLAYLIST 那个 block）是 weapi 侧唯一的
+ * 雷达入口 —— 服务端把 radar 藏在这条通用 block 流里，没有独立端点
+ * （带 radar 字样的 7 个候选路径全 404）。refresh/cursor 是上游 module 的
+ * 原始字段：refresh 为布尔、cursor 首次传字符串 "-1"。 */
+ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor) {
+    jmap *data = jmap_new();
+    jmap_put_bool(data, "refresh", refresh && *refresh && strcmp(refresh, "0") != 0);
+    jmap_put(data, "cursor", cursor && *cursor ? cursor : "-1");
+    char url[640];
+    snprintf(url, sizeof url, "%s/api/homepage/block/page", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, COOKIES_OS_IOS);
+    jmap_free(data);
+    return r;
+}
