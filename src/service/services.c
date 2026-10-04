@@ -819,7 +819,12 @@ ne_resp *ne_playlist_list(const char *cat, const char *limit,
  * 原始字段：refresh 为布尔、cursor 首次传字符串 "-1"。 */
 ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor) {
     jmap *data = jmap_new();
-    jmap_put_bool(data, "refresh", refresh && *refresh && strcmp(refresh, "0") != 0);
+    /* refresh 是布尔，**只有显式真值算真**：原先写的是「不等于 "0" 就算真」，
+     * 于是 Kotlin 侧传 "false"（本意是「走服务端当日缓存」）被判成 true ——
+     * 每次进探索页都在强制服务端重新出卡。与 asc（只认 "true"）统一口径。 */
+    jmap_put_bool(
+        data, "refresh",
+        refresh && (strcmp(refresh, "true") == 0 || strcmp(refresh, "1") == 0));
     jmap_put(data, "cursor", cursor && *cursor ? cursor : "-1");
     char url[640];
     snprintf(url, sizeof url, "%s/api/homepage/block/page", ne_api_base());

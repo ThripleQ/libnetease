@@ -244,7 +244,9 @@ ne_resp *ne_playlist_list(const char *cat, const char *limit,
  * 这是 weapi 侧**唯一**的雷达入口：任何路径里带 radar 字样的独立端点
  * （/api/radar/... 等 7 个候选）全部 404，api-enhanced 439 个 module 里
  * 也没有 radar —— 它只作为 block 流里的一个 block 存在，不单独暴露。
- * refresh 非 0 = 强制刷新（服务端重新出卡）；cursor 首次传 "-1"。 */
+ * refresh 是布尔：**只有 "true"/"1" 算真**（= 强制服务端重新出卡）；
+ * "false"/"0"/空 = 用服务端当日缓存，「猜你喜欢的「XX」好歌」那一路形态就来自它
+ * —— 客户端要的就是缓存态，所以别再把 "false" 解析成真。cursor 首次传 "-1"。 */
 ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor);
 
 /* SimiArtistService — /weapi/discovery/simiArtist {artistid}：**相似歌手**。
