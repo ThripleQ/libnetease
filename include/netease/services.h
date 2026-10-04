@@ -221,4 +221,15 @@ ne_resp *ne_style_playlist(const char *tag_id, const char *size,
  * 每次调用返回一批不同的歌（服务端按口味随机出，无分页），需登录。 */
 ne_resp *ne_radio_get(const char *mode, const char *sub_mode,
                       const char *limit);
+
+/* PlaylistCatalogueService — /weapi/playlist/catalogue，空 data。歌单分类总表
+ * （categories: 0 语种 / 1 风格 / 2 场景 / 3 情感 / 4 主题，sub[] 是标签）。
+ * 标签没有封面（imgUrl 恒 null），卡片封面要另取 —— 见 ne_playlist_list。 */
+ne_resp *ne_playlist_catalogue(void);
+
+/* PlaylistListService — /weapi/playlist/list {cat, order, limit, offset, total}
+ * （分类歌单；**不是** /top/playlist，那个路径已 404）。给一个标签名（清晨 /
+ * 伤感 / 治愈…）返回该标签下的热门歌单，用来给「场景音乐」的标签卡配封面。 */
+ne_resp *ne_playlist_list(const char *cat, const char *limit,
+                          const char *offset);
 #endif

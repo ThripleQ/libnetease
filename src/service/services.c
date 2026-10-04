@@ -735,7 +735,11 @@ ne_resp *ne_style_song(const char *tag_id, const char *size,
     jmap_put_int(data, "tagId", tag_id && *tag_id ? atol(tag_id) : 0);
     jmap_put_int(data, "sort", 0);
     char url[640];
-    snprintf(url, sizeof url, "%s/api/style-tag/home/song", ne_api_base());
+    // 前缀必须是 /weapi 而不是 /api：上游 request.js 发 weapi 时会把 uri 的
+    // `/api` 重写成 `/weapi`（`url = domain + '/weapi/' + uri.substr(5)`），
+    // 而服务端只在 /weapi 下注册了 style-tag 系列 —— 直接打 /api 会返回
+    // {"msg":"参数错误","code":400}（2026-10-04 探针实测）。
+    snprintf(url, sizeof url, "%s/weapi/style-tag/home/song", ne_api_base());
     ne_resp *r = ne_create_weapi(url, data, NULL);
     jmap_free(data);
     return r;
@@ -750,7 +754,7 @@ ne_resp *ne_style_playlist(const char *tag_id, const char *size,
     jmap_put_int(data, "tagId", tag_id && *tag_id ? atol(tag_id) : 0);
     jmap_put_int(data, "sort", 0);
     char url[640];
-    snprintf(url, sizeof url, "%s/api/style-tag/home/playlist", ne_api_base());
+    snprintf(url, sizeof url, "%s/weapi/style-tag/home/playlist", ne_api_base());
     ne_resp *r = ne_create_weapi(url, data, NULL);
     jmap_free(data);
     return r;
@@ -770,6 +774,38 @@ ne_resp *ne_radio_get(const char *mode, const char *sub_mode,
     char url[640];
     snprintf(url, sizeof url, "%s/api/v1/radio/get", ne_api_base());
     ne_resp *r = ne_create_weapi(url, data, COOKIES_OS_IOS);
+    jmap_free(data);
+    return r;
+}
+
+/* playlist_catalogue.js — /api/playlist/catalogue，空 data，weapi。
+ * 歌单分类总表：categories 0 语种 / 1 风格 / 2 场景 / 3 情感 / 4 主题，
+ * sub[] 是标签（name/category/hot…）。注意标签**没有封面**（imgUrl 恒 null），
+ * 所以「场景音乐」卡的封面得另取：见 ne_playlist_list。 */
+ne_resp *ne_playlist_catalogue(void) {
+    jmap *data = jmap_new();
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/playlist/catalogue", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* top_playlist.js — /api/playlist/list（**不是** /top/playlist，那个路径
+ * 已经 404 了）{cat, order, limit, offset, total}。分类歌单：给一个标签名
+ * （清晨 / 伤感 / 治愈…）返回该标签下的热门歌单。
+ * limit/offset/total 走数字/布尔，与 style-tag 同样的规矩。 */
+ne_resp *ne_playlist_list(const char *cat, const char *limit,
+                          const char *offset) {
+    jmap *data = jmap_new();
+    jmap_put(data, "cat", cat && *cat ? cat : "全部");
+    jmap_put(data, "order", "hot");
+    jmap_put_int(data, "limit", limit && *limit ? atol(limit) : 6);
+    jmap_put_int(data, "offset", offset && *offset ? atol(offset) : 0);
+    jmap_put_int(data, "total", 1);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/playlist/list", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
     jmap_free(data);
     return r;
 }
