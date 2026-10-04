@@ -189,4 +189,36 @@ ne_resp *ne_comments(const char *thread_id, const char *limit,
  * shape; the "hot" comments tab of the same thread. */
 ne_resp *ne_comments_hot(const char *thread_id, const char *limit,
                          const char *offset, const char *before_time);
+
+/* ── explore / homepage family (added 2026-10-04) ─────────────────────
+ * 第三方客户端「探索页」需要的两个官方数据源：首页龙珠入口 + 曲风(style-tag)
+ * 体系。端点钉自 api-enhanced 现行 module（Binaryify 已归档）。
+ * 全部 weapi；dragon ball 需登录态，未登录返回空数组 —— 调用方必须 fallback。 */
+
+/* HomepageDragonBallService — /api/homepage/dragon/ball/static，空 data。
+ * 官方客户端首页「发现」页顶部那排圆形入口（每日推荐 / 歌单 / 排行榜 /
+ * 私人 FM…）。移动端接口，故 cookie 带 os=ios。未登录返回 {"data":[]}。 */
+ne_resp *ne_dragon_ball(void);
+
+/* StyleListService — /api/tag/list/get，空 data：曲风标签总表（tagId + 名称）。 */
+ne_resp *ne_style_list(void);
+
+/* StyleSongService — /api/style-tag/home/song {cursor,size,tagId,sort}。
+ * 四个字段在 wire 上都是 JSON **数字**（传字符串会被服务端拒），所以走
+ * jmap_put_int 而不是 jmap_put。 */
+ne_resp *ne_style_song(const char *tag_id, const char *size,
+                       const char *cursor);
+
+/* StylePlaylistService — /api/style-tag/home/playlist {cursor,size,tagId,sort}，
+ * 同样是数字字段；sort 固定 0。 */
+ne_resp *ne_style_playlist(const char *tag_id, const char *size,
+                           const char *cursor);
+
+/* RadioService（私人漫游 / 私人 FM）— weapi /api/v1/radio/get。
+ * mode/subMode 是官方客户端漫游页那排「听歌模式」；两者同样是 JSON 数字。
+ * 传空 mode 表示「默认模式」，此时整包不带 mode/subMode，等价于上游
+ * personal_fm.js 的空 data —— 官方 App 的默认值，比猜一个 mode 安全。
+ * 每次调用返回一批不同的歌（服务端按口味随机出，无分页），需登录。 */
+ne_resp *ne_radio_get(const char *mode, const char *sub_mode,
+                      const char *limit);
 #endif

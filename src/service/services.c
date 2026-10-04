@@ -697,3 +697,79 @@ ne_resp *ne_comments_hot(const char *thread_id, const char *limit,
     jmap_free(data);
     return r;
 }
+
+/* ══ explore / homepage family (2026-10-04) ═══════════════════════════
+ * 探索页补齐。端点是 2026 现行路径（钉自 api-enhanced module），不是 Go
+ * v1.6.0 移植的一部分 —— 因此不参与 dualrun 的 Go 逐字节比对。 */
+
+/* homepage_dragon_ball.js — /api/homepage/dragon/ball/static，空 data，
+ * weapi。移动端接口 → cookie 附 os=ios。未登录时服务端返回空数组。 */
+ne_resp *ne_dragon_ball(void) {
+    jmap *data = jmap_new();
+    char url[640];
+    snprintf(url, sizeof url, "%s/api/homepage/dragon/ball/static",
+             ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, COOKIES_OS_IOS);
+    jmap_free(data);
+    return r;
+}
+
+/* style_list.js — /api/tag/list/get，空 data，weapi。曲风标签总表。 */
+ne_resp *ne_style_list(void) {
+    jmap *data = jmap_new();
+    char url[640];
+    snprintf(url, sizeof url, "%s/api/tag/list/get", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* style_song.js — /api/style-tag/home/song {cursor,size,tagId,sort}。
+ * 四字段均为 JSON 数字：上游 query 直接传数字，传字符串服务端会拒
+ * （与 ne_radio_programs 同样的坑），故用 jmap_put_int。 */
+ne_resp *ne_style_song(const char *tag_id, const char *size,
+                       const char *cursor) {
+    jmap *data = jmap_new();
+    jmap_put_int(data, "cursor", cursor && *cursor ? atol(cursor) : 0);
+    jmap_put_int(data, "size", size && *size ? atol(size) : 20);
+    jmap_put_int(data, "tagId", tag_id && *tag_id ? atol(tag_id) : 0);
+    jmap_put_int(data, "sort", 0);
+    char url[640];
+    snprintf(url, sizeof url, "%s/api/style-tag/home/song", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* style_playlist.js — /api/style-tag/home/playlist，字段同 style_song。 */
+ne_resp *ne_style_playlist(const char *tag_id, const char *size,
+                           const char *cursor) {
+    jmap *data = jmap_new();
+    jmap_put_int(data, "cursor", cursor && *cursor ? atol(cursor) : 0);
+    jmap_put_int(data, "size", size && *size ? atol(size) : 20);
+    jmap_put_int(data, "tagId", tag_id && *tag_id ? atol(tag_id) : 0);
+    jmap_put_int(data, "sort", 0);
+    char url[640];
+    snprintf(url, sizeof url, "%s/api/style-tag/home/playlist", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* radio_get — 私人漫游 weapi /api/v1/radio/get {mode, subMode, limit}。
+ * 移动端接口（App 的漫游页才有），故 cookie 带 os=ios。
+ * mode 为空 → 不写 mode/subMode，走服务端默认模式。 */
+ne_resp *ne_radio_get(const char *mode, const char *sub_mode,
+                      const char *limit) {
+    jmap *data = jmap_new();
+    if (mode && *mode) {
+        jmap_put_int(data, "mode", atol(mode));
+        jmap_put_int(data, "subMode", sub_mode && *sub_mode ? atol(sub_mode) : 0);
+    }
+    jmap_put_int(data, "limit", limit && *limit ? atol(limit) : 3);
+    char url[640];
+    snprintf(url, sizeof url, "%s/api/v1/radio/get", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, COOKIES_OS_IOS);
+    jmap_free(data);
+    return r;
+}
