@@ -246,4 +246,12 @@ ne_resp *ne_playlist_list(const char *cat, const char *limit,
  * 也没有 radar —— 它只作为 block 流里的一个 block 存在，不单独暴露。
  * refresh 非 0 = 强制刷新（服务端重新出卡）；cursor 首次传 "-1"。 */
 ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor);
+
+/* SimiArtistService — /weapi/discovery/simiArtist {artistid}：**相似歌手**。
+ * 传入一个歌手 id，返回一批相似歌手（`artists[]`，每项含 id/name/picUrl/
+ * albumSize 等）。kanade 主页那张「相似艺人 / 从你喜欢的艺人听起」卡
+ * （它源码里的标识是 `artist_fm`）就走这条链路 —— 种子歌 → 歌手 → 相似歌手
+ * → 相似歌手的热门歌。**这是真正对得上语义的接口**：以前我们拿「同一歌手的
+ * 热门歌」冒充相似艺人，播出来永远是种子歌手自己的歌。 */
+ne_resp *ne_simi_artist(const char *artist_id);
 #endif

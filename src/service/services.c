@@ -827,3 +827,16 @@ ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor) {
     jmap_free(data);
     return r;
 }
+
+/* simi_artist — weapi/discovery/simiArtist {artistid}（相似歌手）。
+ * 字段名是 `artistid`（全小写，没有下划线），与上游 simi_artist.js 一致；
+ * 写成 artistId 服务端会当成没传参数。 */
+ne_resp *ne_simi_artist(const char *artist_id) {
+    jmap *data = jmap_new();
+    jmap_put(data, "artistid", artist_id);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/discovery/simiArtist", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
