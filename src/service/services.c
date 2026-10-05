@@ -825,9 +825,18 @@ ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor) {
     jmap_put_bool(
         data, "refresh",
         refresh && (strcmp(refresh, "true") == 0 || strcmp(refresh, "1") == 0));
-    jmap_put(data, "cursor", cursor && *cursor ? cursor : "-1");
+    /* cursor **只在调用方真的给了值时才带**。这条端点的 /weapi/ 路由只实现了
+     * 无分页形态：cursor 只要非空（"-1" 哨兵、0、数字还是字符串、甚至服务端
+     * 自己返回的那个真游标，全都一样）就固定返 HTTP 200 + {"code":50002}
+     * （74 字节）—— 详见 ne_create_weapi_asis 的注释。首页只要第一屏 blocks，
+     * 不带 cursor 即得全套（雷达块 6 张 + 猜你喜欢 4 组），这也正是上游
+     * api-enhanced 的默认调用形态（data.cursor 为 undefined，序列化时被丢掉）。
+     * 将来真要按 cursor 翻 block 流，只能改走 /api/ 老网关（asis）+ 非空 cursor。 */
+    if (cursor && *cursor) jmap_put(data, "cursor", cursor);
     char url[640];
     snprintf(url, sizeof url, "%s/api/homepage/block/page", ne_api_base());
+    /* 标准 ne_create_weapi（URL 里的 /api/ 段被重写成 /weapi/ = 主流网关）。
+     * 这里不带 cursor，正好落在 /weapi/ 能正常服务的那个形态上。 */
     ne_resp *r = ne_create_weapi(url, data, COOKIES_OS_IOS);
     jmap_free(data);
     return r;

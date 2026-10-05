@@ -246,7 +246,11 @@ ne_resp *ne_playlist_list(const char *cat, const char *limit,
  * 也没有 radar —— 它只作为 block 流里的一个 block 存在，不单独暴露。
  * refresh 是布尔：**只有 "true"/"1" 算真**（= 强制服务端重新出卡）；
  * "false"/"0"/空 = 用服务端当日缓存，「猜你喜欢的「XX」好歌」那一路形态就来自它
- * —— 客户端要的就是缓存态，所以别再把 "false" 解析成真。cursor 首次传 "-1"。 */
+ * —— 客户端要的就是缓存态，所以别再把 "false" 解析成真。
+ * cursor **留空**（传 NULL 或 ""）：本端点走 /weapi/ 时只实现了无分页形态，
+ * cursor 只要非空（含服务端自己返回的游标）就固定返 50002 —— 见
+ * ne_create_weapi_asis 的注释。首页要的就是第一屏 blocks，留空即得全套。
+ * 真要按 cursor 翻页，得改走 /api/ 老网关（asis）。 */
 ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor);
 
 /* SimiArtistService — /weapi/discovery/simiArtist {artistid}：**相似歌手**。

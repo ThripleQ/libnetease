@@ -382,8 +382,10 @@ static ne_resp *post_common(const char *orig_url, const char *post_url,
     return r;
 }
 
-ne_resp *ne_create_weapi(const char *url, jmap *data,
-                         const char *const *extra_cookies) {
+/* Shared weapi implementation. rewrite=1 → <...>api/ 段换成 /weapi/（绝大多数
+ * 端点走这条）；rewrite=0 → url 原样发出（见 ne_create_weapi_asis）。 */
+static ne_resp *weapi_request(const char *url, jmap *data,
+                              const char *const *extra_cookies, int rewrite) {
     /* csrf_token from jar __csrf, injected pre-encryption (weapi branch).
      * Copied out under lock — jmap_put strdup's it immediately, but we must
      * not hold the pointer into the jar across the request. */
@@ -406,12 +408,44 @@ ne_resp *ne_create_weapi(const char *url, jmap *data,
     }
     const char *kv[4] = { "params", enc.params, "encSecKey", enc.enc_sec_key };
     char *form = ne_http_form_encode(kv, 2);
-    char *final_url = ne_rewrite_api_segment(url, "/weapi/");
+    char *final_url = rewrite ? ne_rewrite_api_segment(url, "/weapi/")
+                              : ne_xstrdup(url);
 
     ne_resp *r = post_common(url, final_url, form, choose_ua(), extra_cookies, 0);
     free(form); free(final_url);
     ne_weapi_free(&enc);
     return r;
+}
+
+ne_resp *ne_create_weapi(const char *url, jmap *data,
+                         const char *const *extra_cookies) {
+    return weapi_request(url, data, extra_cookies, 1);
+}
+
+/* ne_create_weapi 的原样版：**不做 /api/ → /weapi/ 重写**，url 直接发出去。
+ *
+ * 用途：极少数端点的 /weapi/ 同名路由不可用，只能打 /api/ 老网关。目前唯一的
+ * 已知场景是 block 流的 **cursor 分页**。2026-10-05 定测（同一份加密数据，随机
+ * 化顺序、每次只换一个变量）：
+ *   /api/homepage/block/page   + cursor → 200，136KB～146KB，正常
+ *   /weapi/homepage/block/page + cursor → 200，**74 字节 code=50002**
+ *   /weapi/homepage/block/page   不带 cursor / cursor 传空串 → 200，正常
+ * cursor 的 JSON 类型（字符串 "-1" / 数字 -1 / 数字 0）、以及**服务端自己返回的
+ * 那个真游标**，在 /weapi/ 下结果全是 50002；登录/未登录、os=ios/os=pc、refresh
+ * 传布尔还是字符串也都一样；A/B 交替稳定跟随变量 → 不是风控、不是参数类型写错，
+ * 而是 /weapi/ 那条路由**只实现了无分页形态**，老网关 /api/ 才认 cursor。
+ *
+ * 注意 ne_homepage_block_page **当前并不用它**：首页只要第一屏 blocks，不带
+ * cursor 走标准 /weapi/ 就够，且这正是上游 api-enhanced 的默认调用形态
+ * （它的 data.cursor 默认 undefined，序列化时被 JSON.stringify 丢掉）。
+ * 将来真要按 cursor 翻 block 流，才需要本函数 + /api/ 前缀。
+ *
+ * 这类坑的表现极具误导性：探索页**雷达歌单整栏消失 + 猜你喜欢只剩登录提示**，
+ * 与 UI 层 bug 长得一模一样（解析不出 data.blocks，两块内容一起空掉）。
+ * 真机上唯一的线索是 blockPage 那行日志里的 len 小得反常（74）。 */
+ne_resp *ne_create_weapi_asis(const char *url, jmap *data,
+                              const char *const *extra_cookies) {
+    return weapi_request(url, data, extra_cookies, 0);
 }
 
 /* CallWeapi-equivalent transport for login flows: no anti-fraud cookie

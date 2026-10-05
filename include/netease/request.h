@@ -65,6 +65,16 @@ ne_resp *ne_create_weapi(const char *url, jmap *data,
  * injection (no os/appver/NMTID), clean web request like request.go's
  * NewRequest path. */
 ne_resp *ne_create_weapi_clean(const char *url, jmap *data);
+/* Same as ne_create_weapi but WITHOUT the /\w*api/ → /weapi/ rewrite: the url
+ * is sent verbatim, i.e. it stays on the older /api/ gateway. For the rare
+ * endpoint whose /weapi/ route cannot do the job — currently only block-stream
+ * pagination: /weapi/homepage/block/page rejects ANY non-empty `cursor` (the
+ * "-1" sentinel, 0, or even the cursor it handed out itself) with
+ * HTTP 200 + {"code":50002} (74 bytes), while /api/homepage/block/page accepts
+ * it. Not used by ne_homepage_block_page today, since the homepage works fine
+ * without a cursor on the standard /weapi/ path. */
+ne_resp *ne_create_weapi_asis(const char *url, jmap *data,
+                              const char *const *extra_cookies);
 
 /* util.CreateRequest(..., {Crypto:"linuxapi"}) — payload
  * {method, url(/api/), params} AES-ECB encrypted, POSTed to
