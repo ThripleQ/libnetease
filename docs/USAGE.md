@@ -13,7 +13,7 @@
 
 ```
 ┌─ 服务层 (src/service/) ────────────────────────────────┐
-│ ne_search / ne_song_url_v1 / … 33 个服务函数           │
+│ ne_search / ne_song_url_v1 / … 48 个服务函数           │
 │ 每个函数 = 一次 HTTP 往返，返回原始 ne_resp             │
 ├─ 请求内核 (src/core/request.c) ────────────────────────┤
 │ 通道①weapi(create_weapi)  通道②linuxapi  通道③eapi      │
@@ -154,39 +154,100 @@ typedef struct {
 - `ne_jar_import_cookies()` 线程安全（jar 锁 + 落盘在锁内），可随时调。
 - Set-Cookie 消费发生在响应对象上，无共享回传通道 —— 并发请求各自的 cookie 回写互不干扰。
 
-## 4. 服务清单（33 个函数）
+## 4. 服务清单（48 个函数，按家族分组）
 
 "通道"列：**W**=weapi(create_weapi) ｜ **W!**=weapi(call_weapi 严格) ｜ **L**=linuxapi ｜ **E**=eapi。
 "登录"列：✓ 需要登录 cookie（MUSIC_U）；✗ 匿名可用；— 登录动作本身。
+
+新增的歌手 / 电台 / 评论 / 探索页四大家族端点（含 `services.h` 里的参数默认值）已按
+`src/service/services.c` 实录；探索页一族端点钉自 api-enhanced 现行 module
+（`ckylinmc/neteasecloudmusicapi`），与上游逐module核对过（见 §8 备注）。
+
+### 4.1 搜索 / 歌曲（含已购）
 
 | 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
 |---|---|---|---|---|
 | `ne_search(s,type,limit,offset)` | `/weapi/cloudsearch/pc`（type=2000 走 voice） | W | 空 type/limit/offset → "1"/"30"/"0" | ✗ |
 | `ne_check_music(id,br)` | `/weapi/song/enhance/player/url` | W | br 空 → "999000" | ✗ |
-| `ne_record_recent(limit)` | `/weapi/play-record/song/list` | W | | ✓ |
-| `ne_recommend_resource(void)` | `/weapi/v1/discovery/recommend/resource` | W | | ✓ |
 | `ne_song_url_v1(id,level)` | `/weapi/song/enhance/player/url/v1` | **W!** | level 空 → "higher"；"sky" 加 immerseType=c51；encodeType 恒 "flac" | ✗（匿名限低码率） |
 | `ne_song_url_old(id,br)` | `/weapi/song/enhance/player/url` | W | 2026-09 起（原 linuxapi，与 check_music 同端点同参数） | ✗ |
-| `ne_song_download_url(id,level)` | `/weapi/song/enhance/download/url/v1` | **W!** | | ✓（已购） |
-| `ne_song_music_quality(id)` | `/weapi/song/music/detail/get` | W | | ✓ |
-| `ne_song_purchased(limit,offset)` | `/weapi/single/mybought/song/list` | W | | ✓ |
-| `ne_album_purchased(limit,offset)` | `/weapi/digitalAlbum/purchased` | W | | ✓ |
-| `ne_album_detail(id)` | `/weapi/v1/album/<id>` | W | body 同时带 id 字段 | ✗ |
-| `ne_song_detail(ids_csv)` | `/weapi/v3/song/detail` | W | `c=[{"id":…},…]` | ✗ |
-| `ne_playlist_detail(id,s)` | `/weapi/v6/playlist/detail` | W | n=100000；s 空 → "8"（订阅者数）。2026-09 起（原 linuxapi+v3） | ✗ |
-| `ne_user_playlist(uid,limit,offset)` | `/weapi/user/playlist` | W | 空 → 30/0 | ✗ |
+| `ne_song_download_url(id,level)` | `/weapi/song/enhance/download/url/v1` | **W!** | level 空 → "standard" | ✓（已购） |
+| `ne_song_music_quality(id)` | `/weapi/song/music/detail/get` | W | 单曲各音质档 source 表（l/…/jm），钉自 chaunsin | ✓ |
+| `ne_song_purchased(limit,offset)` | `/weapi/single/mybought/song/list` | W | 已购单曲 | ✓ |
+| `ne_album_purchased(limit,offset)` | `/weapi/digitalAlbum/purchased` | W | 已购数字专辑 | ✓ |
+| `ne_song_detail(ids_csv)` | `/weapi/v3/song/detail` | W | ids "1,2,3" → c=[{"id":…}] | ✗ |
 | `ne_lyric(id)` | `/weapi/song/lyric` | W | lv/kv/tv/rv=-1，_nmclfl=1；2026-09 起（原 linuxapi） | ✗ |
+
+### 4.2 歌单 / 榜单 / 发现
+
+| 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
+|---|---|---|---|---|
+| `ne_playlist_detail(id,s)` | `/weapi/v6/playlist/detail` | W | n=100000；s 空 → "8" | ✗ |
+| `ne_user_playlist(uid,limit,offset)` | `/weapi/user/playlist` | W | 空 → 30/0 | ✗ |
 | `ne_toplist_detail(void)` | `/weapi/toplist/detail` | W | | ✗ |
+| `ne_recommend_resource(void)` | `/weapi/v1/discovery/recommend/resource` | W | | ✓ |
 | `ne_recommend_songs(void)` | `/weapi/v3/discovery/recommend/songs` | W | cookie os=ios | ✓ |
-| `ne_recommend_playlists(limit)` | `/weapi/personalized/playlist` | W | | ✗ |
+| `ne_recommend_playlists(limit)` | `/weapi/personalized/playlist` | W | {limit, order=true, n=1000} | ✗ |
+| `ne_playlist_list(cat,limit,offset)` | `/weapi/playlist/list` | W | cat 空 → "全部"；order=hot；limit 空 → 6（=api-enhanced `top_playlist.js`，**非** /top/playlist） | ✗ |
+| `ne_playlist_catalogue(void)` | `/weapi/playlist/catalogue` | W | 歌单分类总表（=api-enhanced `playlist_catlist.js`） | ✗ |
+
+### 4.3 专辑 / 艺人
+
+| 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
+|---|---|---|---|---|
+| `ne_album_detail(id)` | `/weapi/v1/album/<id>` | W | 专辑详情（含曲目） | ✗ |
+| `ne_artist_detail(id)` | `/weapi/v1/artist/<id>` | W | {artist, hotSongs, more}，一次取艺人+Top50热歌 | ✗ |
+| `ne_artist_songs(id,offset,limit,order)` | `/weapi/v1/artist/songs` | W | order 空 → "hot"（else "time"） | ✗ |
+| `ne_artist_albums(id,limit,offset)` | `/weapi/artist/albums/<id>` | W | total 恒 "true" | ✗ |
+| `ne_artist_desc(id)` | `/weapi/artist/introduction` | W | | ✗ |
+
+### 4.4 电台 / 播客
+
+| 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
+|---|---|---|---|---|
+| `ne_radio_detail(id)` | `/weapi/djradio/get` | W | **v1**（v2 返回 404） | ✗ |
+| `ne_radio_programs(radio_id,limit,offset,asc)` | `/weapi/dj/program/byradio` | W | 首三参需 JSON **数字**、asc 需 JSON 布尔（字符串被拒 code 400） | ✗ |
+
+### 4.5 评论
+
+| 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
+|---|---|---|---|---|
+| `ne_comments(thread_id,limit,offset,before_time)` | `/weapi/v1/resource/comments/<thread_id>` | W | thread 前缀：song `R_SO_4`/album `R_AL_3`/playlist `A_PL_0`/program `R_VI_62` | ✗ |
+| `ne_comments_hot(thread_id,limit,offset,before_time)` | `/weapi/v1/resource/hotcomments/<thread_id>` | W | 同侪「热门」标签 | ✗ |
+
+### 4.6 探索页 / 首页（2026-10-04 新增，api-enhanced 现行 module）
+
+> 这批端点钉自 `ckylinmc/neteasecloudmusicapi`（api-enhanced 一线，Binaryify 已归档）；**不参与**
+> dualrun 的 Go 逐字节比对（Go v1.6.0 无此批）。全部 weapi。
+
+| 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
+|---|---|---|---|---|
+| `ne_dragon_ball(void)` | `/api/homepage/dragon/ball/static` | W | 首页「发现」顶部圆形入口；移动端 → cookie os=ios；未登录返回 data=[] | ✗ |
+| `ne_style_list(void)` | `/api/tag/list/get` | W | 曲风标签总表（=api-enhanced `style_list.js`） | ✗ |
+| `ne_style_song(tag_id,size,cursor)` | `/weapi/style-tag/home/song` | W | cursor/size/tagId/sort 全为 JSON **数字**（=`style_song.js`） | ✗ |
+| `ne_style_playlist(tag_id,size,cursor)` | `/weapi/style-tag/home/playlist` | W | 同上，sort 恒 0（=`style_playlist.js`） | ✗ |
+| `ne_radio_get(mode,sub_mode,limit)` | `/api/v1/radio/get` | W | 私人漫游；mode 空 → 整包不带 mode/subMode（=`personal_fm.js`）；需登录 | ✓ |
+| `ne_homepage_block_page(refresh,cursor)` | `/api/homepage/block/page` | W | 首页 block 流；「雷达歌单」=DATA.blocks[] where blockCode`HOMEPAGE_BLOCK_MGC_PLAYLIST`；refresh 仅显式 "true"/"1" 为真；cursor 留空（其 /weapi/ 路由反 50002） | ✗ |
+| `ne_simi_artist(artist_id)` | `/weapi/discovery/simiArtist` | W | 字段名小写 `artistid`（写 artistId 服务端不当参数）；相似歌手（=api-enhanced `simi_artist.js`） | ✗ |
+
+### 4.7 红心 / 账户 / 写操作
+
+| 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
+|---|---|---|---|---|
+| `ne_like_list(uid)` | `/weapi/song/like/get` | W | 红心歌曲清单 | ✓ |
+| `ne_record_recent(limit)` | `/weapi/play-record/song/list` | W | limit 空 → "100" | ✓ |
 | `ne_user_account(void)` | `/weapi/w/nuser/account/get` | W | 903d337 起（旧路径已失效） | ✓ |
-| `ne_vip_info(void)` | `/weapi/music-vip-membership/front/vip/info` | W | | ✓ |
-| `ne_like_list(uid)` | `/weapi/song/like/get` | W | | ✓ |
+| `ne_vip_info(void)` | `/weapi/music-vip-membership/front/vip/info` | **W!** | 钉自 Binaryify `vip_info.js`；redVipLevel/redVipExpireTime/musicPackage | ✓ |
 | `ne_playlist_subscribe(id,t)` | `/weapi/playlist/subscribe`/`unsubscribe` | W | t="1" 收藏 "0" 取消 | ✓ |
 | `ne_playlist_tracks(op,pid,track_id)` | `/weapi/playlist/manipulate/triacks`（拼错是服务端历史） | W | op=add/del；trackIds 双写为 Go 兼容 quirk | ✓ |
-| `ne_playlist_create(name,privacy)` | `/weapi/playlist/create` | W | privacy "0" 公开 "10" 私密 | ✓ |
+| `ne_playlist_create(name,privacy)` | `/weapi/playlist/create` | W | privacy "0" 公开 "10" 私密（其余强制 "0"，Go 行为） | ✓ |
 | `ne_playlist_delete(id)` | `/weapi/playlist/remove` | W | | ✓ |
 | `ne_playlist_update_name(id,name)` | eapi `interface3`（HTTP 明文） | **E** | Go v1.6.0 行为复刻 | ✓ |
+
+### 4.8 登录
+
+| 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
+|---|---|---|---|---|
 | `ne_login_email(email,password)` | `/weapi/login` | W | 密码先 MD5；cookie os=ios | — |
 | `ne_login_cellphone(phone,password)` | `/weapi/w/login/cellphone` | W | 023149c 起（含 secureCaptcha） | — |
 | `ne_login_refresh(void)` | `/weapi/login/token/refresh` | W | csrf 取自 jar | — |
@@ -237,10 +298,16 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
 - 桌面：CLI 自动 load/save。嵌入式：`ne_set_cookie_file()` 指到应用私有目录，`ne_jar_import_cookies()` 从 WebView 导出的 cookie 串导入（nume 的网页登录即此方案）。
 - `filterJar` 语义（cookiejar.c）：反欺诈策略写入的**假 NMTID**（`some_random_id_from_strategy`）与 cookie 属性段（`Expires=` 等带 = 的部分）不会进入 jar / 不会落盘。
 
-## 8. 已知限制与风险（2026-09 审计，对照 api-enhanced 现行实现）
+## 8. 已知限制与风险（2026-10-05 审计，对照权威上游在线核对）
 
 1. **通道现状**：linuxapi 已全部移出请求路径（playlist_detail → weapi+v6，lyric/song_url_old → weapi）；song_url_v1 仍走 weapi，api-enhanced 另有 xeapi（会话密钥协商）进阶方案，高音质场景可关注。
 2. **NMTID**：反欺诈策略仅在 jar 无 NMTID 时注入假值（不落盘）；服务端下发的真值优先复用，对齐 api-enhanced 2026-08 行为。
 3. **协议正确性**：四把密钥、RSA 公钥、URL 重写、JSON 转义经向量级测试 + 差分双跑验证（52 用例）。
+4. **探索页一族端点核对**（2026-10-05 对 `ckylinmc/neteasecloudmusicapi` 逐 module 核对）：
+   - `ne_dragon_ball` / `ne_homepage_block_page`：上游 module 声明 `crypto='eapi'`，本库用 **weapi**（`ne_create_weapi`）。实测 weapi 可正常取数；若未来遇 -462/空 body 风控增强，可对照上游改走 eapi 通道（linuxapi/eapi 通道代码已在核心，仅需换转发封装）。
+   - `ne_style_song` / `ne_style_playlist`：上游 `crypto='weapi'`，与库一致；sort 在 `style_playlist.js` 上游写死 0，与本库一致。
+   - `ne_playlist_list` / `ne_playlist_catalogue`：对应上游 `top_playlist.js` / `playlist_catlist.js`（均 weapi），与库一致。
+   - `ne_comments` / `ne_comments_hot`：上游现行 module 已迁移到 **v2 eapi**（`/api/v2/resource/comments`，threadId 放 body、分页用 pageNo/pageSize/cursor）；本库仍是 **v1 weapi**（threadId 放路径、offset+beforeTime 分页）。v1 仍可正常返回，但对齐上游的长期方向是 v2。thread 前缀（`R_SO_4_`/`A_PL_0_` 等）两种版本一致，调用方无感。
+   - `ne_radio_get`：无独立上游 module（上游把它塞进 `personal_fm.js` 的 `/api/v1/radio/get` 空 data）；本库模式（mode/subMode 扩展 + cookie os=ios）为 nume 侧增强，端点同源可行。
 
 服务行为与 `services.h` 注释有出入时**以 services.c 为准**。

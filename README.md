@@ -9,7 +9,7 @@
 include/netease/   公共头
 src/vendor/        零依赖加密原语：AES-128 / MD5 / RSA(1024bit 无填充) / base64 / hex / 大数
 src/core/          请求内核：weapi/eapi 加密管线、Go 语义 JSON map、随机数
-src/service/       API 端点（按 Go service/ 家族对应）
+src/service/       API 端点：Go service/ 移植 + 探索页一族（2026-10 钉自 api-enhanced）
 src/cli/           netease-cli 壳，stdout 协议 1:1 对齐 Go 版
 tests/             向量测试 + verify_qr.py（独立 QR 解码校验）+ dualrun.py（差分对照，40 用例）
 ```
