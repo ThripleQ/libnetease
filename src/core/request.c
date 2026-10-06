@@ -128,9 +128,15 @@ static void jar_persist_locked(int force) {
         free(fp);
         return;
     }
+    if (ne_jar_save_file(g_jar, g_cookie_path) != 0) {
+        /* 写失败（磁盘满 / 权限）就不记指纹：下一次带着内容变化的响应还能再写。
+         * 若这里照样记指纹，就会永久停在「内存是新的、盘上是旧的」——而这正是
+         * 这条路径要修的那个问题本身。 */
+        free(fp);
+        return;
+    }
     free(g_cookie_fp);
     g_cookie_fp = fp;
-    ne_jar_save_file(g_jar, g_cookie_path);
 }
 
 /* Hard reload from disk. The request pipeline uses init-on-first-access

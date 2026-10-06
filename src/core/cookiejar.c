@@ -16,8 +16,15 @@ struct ne_jar {
 };
 
 static int name_is_attr(const char *n) {
+    /* RFC 6265 的属性名，外加早期草案里真在线上出现过的几个（version/comment/
+     * discard/port/priority/partitioned）。Set-Cookie 是**线上格式**：值后面跟着
+     * 一串属性，漏掉哪个名字，它就会被当成一个 cookie 存进 jar，之后又原样出现在
+     * Cookie 请求头里（凭空多出一个假 cookie，对风控不是好事）。导入路径喂进来的
+     * 是 document.cookie 形状（只有 k=v），碰不到这些。 */
     static const char *attrs[] = {
-        "path", "domain", "expires", "max-age", "secure", "httponly", "samesite", NULL
+        "path", "domain", "expires", "max-age", "secure", "httponly", "samesite",
+        "version", "comment", "commenturl", "discard", "port", "priority",
+        "partitioned", NULL
     };
     for (int i = 0; attrs[i]; i++)
         if (strcasecmp(n, attrs[i]) == 0) return 1;
@@ -89,7 +96,10 @@ int ne_jar_load_file(ne_jar *j, const char *path) {
 }
 
 int ne_jar_save_file(const ne_jar *j, const char *path) {
-    FILE *f = fopen(path, "w");
+    /* 二进制模式不是可选项：文本模式下 MSVC 会把 \n 落成 \r\n，文件就不再是
+     * cookiejar.h 承诺的 Go FileJar 字节格式（同一份 jar 在不同平台上不一致，
+     * 跨平台读回时值里还会带上行尾残留）。 */
+    FILE *f = fopen(path, "wb");
     if (!f) return -1;
     fprintf(f, "# Netscape HTTP Cookie File\n");
     for (size_t i = 0; i < j->len; i++)

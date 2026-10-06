@@ -24,8 +24,11 @@ void ne_http_resp_free(ne_http_resp *r);
  * method is "POST" or "GET" (body/content_type only used for POST);
  * cookie_header may be NULL. Always returns a malloc'd resp, never NULL.
  * Set-Cookie response headers MUST be captured by the transport into
- * resp->set_cookies as "name=value\n" lines — the request layer consumes them
- * directly from the response object (no thread-local back-channel). */
+ * resp->set_cookies as the RAW header values, one per '\n'-terminated line
+ * (attributes included — the jar filters them; see cookiejar.c). The request
+ * layer consumes them directly from the response object (no thread-local
+ * back-channel). Both bundled transports do exactly this: curl via
+ * CURLOPT_HEADERFUNCTION, Android via OkHttp Response.headers("Set-Cookie"). */
 typedef ne_http_resp *(*ne_transport_req_fn)(
     const char *url, const char *method,
     const char *body, const char *content_type,

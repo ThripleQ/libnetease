@@ -75,7 +75,7 @@ ne_http_resp {                                    /* 回调必须 malloc 返回�
     char  *body;          /* malloc'd，NUL 结尾 */
     size_t body_len;
     char  *err;           /* malloc'd 错误串，成功为 NULL */
-    char  *set_cookies;   /* Set-Cookie 按行 "name=value\n"，必须由回调捕获 */
+    char  *set_cookies;   /* Set-Cookie 的**原始头值**，一行一条 '\n' 分隔；属性由 jar 过滤 */
 };
 ```
 
@@ -315,7 +315,10 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
   load 回来是旧值 —— 嵌入式宿主（只在一处导入 cookie、之后全靠响应维护登录态）会吃到写操作
   被判失效的亏。播放场景的 GET 很频繁，所以 ② 既只在真收到 Set-Cookie 时触发，又用
   `ne_jar_cookie_header()` 的内容指纹挡一道，内容没变不写盘。
-- `filterJar` 语义（cookiejar.c）：反欺诈策略写入的**假 NMTID**（`some_random_id_from_strategy`）与 cookie 属性段（`Expires=` 等带 = 的部分）不会进入 jar / 不会落盘。
+- `filterJar` 语义（cookiejar.c）：反欺诈策略写入的**假 NMTID**（`some_random_id_from_strategy`）与 cookie 属性段（`Path=` / `Domain=` / `Expires=` / `HttpOnly=` / `Priority=` 等）不会进入 jar / 不会落盘。属性名清单是**线上格式**的一部分 —— 漏一个名字，它就会变成一个假 cookie 被塞进每个请求的 Cookie 头。
+- **文件格式**：LF 行尾、二进制读写（`fopen(...,"wb")`）。文本模式在 Windows 上会落 CRLF，破坏与 Go 版 FileJar 的字节兼容（跨平台读回时值里会带行尾残留）。
+- **这条路径怎么测**：`tests/test_cookie_persist.c` 注入假传输层（`ne_http_set_transport`），不联网即可确定性触发 —— 真机上服务端根本不轮转（2026-10-07 实测：冷启动 26 个请求 + 4 次写操作，26/26 响应 status=200、**Set-Cookie 一条都没有**），只看真机无法区分「代码对但没被触发」和「代码错且永不触发」。测试覆盖：轮转落盘 / 属性不进 jar / 内容没变不写盘 / 无 Set-Cookie 不写盘 / reload 重置指纹 / 导入强制写 / 未配路径不写 / 落盘→reload 往返逐字一致 / 写失败不记指纹。
+- **已知残留（未修，影响面小）**：① `ne_jar_save_file` 是「截断后写」，不是原子写（先写临时文件再 rename）—— 写盘途中进程被杀会留下半个文件、登录态丢失；现在写盘频率仍极低（只在服务端轮转时），风险窗口是几百微秒。② 服务端若用 `Max-Age=0` 下发删除，本库只把它当成「值为空」，忽略过期语义（jar 一律按 `FAR_FUTURE` 存）。③ 传输层负责跟随重定向，请求内核只看**最终响应**的 Set-Cookie；实测流量无 3xx，故当前无影响。
 
 ## 8. 已知限制与风险（2026-10-05 审计，对照权威上游在线核对）
 
