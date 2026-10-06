@@ -81,3 +81,16 @@ linuxapi `eparams` 全解密按内层 url 分发、eapi 全解密 + md5 信封�
 - 主目录取 `%USERPROFILE%`（等价 `os.UserHomeDir()`），cookie 路径
   `%USERPROFILE%\.cache\netune\cookies.txt`
 - 无 POSIX 专用调用；CMake + libcurl + zlib 可用 MSVC/MinGW 构建
+- **已实证可用**：`build_ninja.sh`（CMake "Ninja" 生成器 + cl.exe + vcpkg）完整跑通
+  `configure → build → ctest`，5/5 全绿（crypto / jval / rewrite / qr 单测 + dualrun 52 用例）。
+  前置：cl.exe 环境变量（INCLUDE/LIB，脚本里已处理）、vcpkg（curl）、ninja、带 pycryptodome
+  的隔离 venv（`ref_impl.py` 生成 `expected.h` 向量）。**不需要** MSBuild / .sln。
+- 两个坑（都踩过）：
+  - CMake 的 **"Visual Studio" 生成器在本机崩溃** —— 它调 MSBuild 探测 `VCTargetsPath` 时
+    MSBuild 报 Access violation（疑似该 VS 实例自身问题）。这不影响构建本身，
+    Ninja / NMake / 直编都绕开它；要用 VS 生成器得先单独排查 MSBuild。
+  - `build_check.sh`（cl.exe 直编全部 .c 的快速语法检查）**必须带 `NE_HAVE_CURL` / `NE_HAVE_ZLIB`
+    宏**，与真实构建同配置。不带宏会漏检 `http.c` 的声明顺序 bug —— 即「检查通过但真构建挂」。
+    另：在 Git Bash 里跑要 `MSYS_NO_PATHCONV=1 bash build_check.sh`，否则 cl 的 `/nologo`、`/W4`
+    会被当路径吃掉，假报一堆 `C1083 无法打开包括文件`。
+  - 覆盖范围：`build_check.sh` 只编 libnetease 自己的源，**不覆盖宿主的 JNI/绑定层**。

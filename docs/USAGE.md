@@ -5,7 +5,7 @@
 - 产物：`libnetease.a`（静态库）+ `netease-cli`（可执行文件）
 - 协议：weapi / linuxapi / eapi 三通道，加密原语自带（AES-128 / MD5 / RSA-1024 无填充 / base64 / hex）
 - 定位：netune（桌面）/ nume（Android）共用的网易云数据网关
-- 风控对策与上游生态调研见 [docs/RISKS.md](RISKS.md)，交接状态见 [../HANDOFF.md](../HANDOFF.md)
+- 风控对策与上游生态调研见 [docs/RISKS.md](RISKS.md)
 
 ---
 
@@ -146,6 +146,15 @@ typedef struct {
 | `ne_qr_get_key` 的 unikey / body_out | 调用方 | `free()` |
 | `ne_generate_chain_id()` | 调用方 | `free()` |
 | `ne_set_api_base` / `ne_set_cookie_file` 入参 | 调用方 | 内部 strdup，调用后即可释放 |
+| **`ne_create_weapi` / `ne_create_weapi_clean` / `ne_create_weapi_asis` / `ne_call_weapi` 的 `jmap *data`** | **调用方** | **不接管**：函数只往里加 `csrf_token`（`data` 会被改动），返回后仍须自己 `jmap_free(data)` |
+| **`ne_call_linuxapi` 的 `jmap *data`** | **被调用方接管** | **不要 free**：`data` 被内嵌成 `params` 子 map，随请求一起释放 |
+
+> **⚠️ 这两行的差别咬过人。** 2026-09 把若干服务从 linuxapi 迁到 weapi 时，
+> `ne_lyric` / `ne_song_url_old` 把「接管」的记忆带了过来、没有补 `jmap_free`，
+> 于是每调一次泄漏一次（lyric 还是 nume 的**高频路径**）。修于 `dbbb3fa`。
+> 迁移时**逐函数核对**，别靠「这一族应该都一样」的印象。
+> C 层判据在 `include/netease/request.h`：`ne_call_linuxapi` 的注释写了
+> `TAKES OWNERSHIP of data (do not free it afterwards)`，其余三个没有这句。
 
 ### 3.4 线程契约（request.h 原文要点）
 

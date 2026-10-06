@@ -44,7 +44,7 @@
 
 | 信号 | 含义 | 典型应对 |
 |---|---|---|
-| `HTTP 200` + 空 body（0 字节） | **数据中心/海外 IP 被风控丢弃**（最隐蔽，HANDOFF 已实证沙箱出口 IP 即此症状） | 换住宅 IP / 代理；`X-Real-IP`+`X-Forwarded-For` 国内 IP；`NE_RANDOM_CN_IP=1` |
+| `HTTP 200` + 空 body（0 字节） | **数据中心/海外 IP 被风控丢弃**（最隐蔽；本项目开发沙箱的出口 IP 即此症状，已实证） | 换住宅 IP / 代理；`X-Real-IP`+`X-Forwarded-For` 国内 IP；`NE_RANDOM_CN_IP=1` |
 | `code -460` / `460` "Cheating" | 签名校验失败 或 频率限制 / 疑似作弊 | 核对加密参数；减速；换 IP；退避重试 |
 | `code -462` "网络太拥挤" | **行为验证**（滑块/验证码，常带 `verifyType`/`verifyUrl`），或 IP 太脏、缺登录 cookie | 引导浏览器登录 / 重新扫码；清理陈旧 cookie 重试（qr-key 已内置） |
 | `code 8821` | 手机号密码登录需**行为验证码** | 换二维码登录 / Cookie 登录 |
@@ -91,7 +91,7 @@
 ## 五、应对策略（分层，全部可选、默认关闭、不破坏 drop-in 兼容）
 
 ### 5.1 网络层（解决"我是谁"）
-- **住宅 IP / 大陆服务器**：根治方案。数据中心 IP 直连 = 空 body（本项目 HANDOFF 已实证）。
+- **住宅 IP / 大陆服务器**：根治方案。数据中心 IP 直连 = 空 body（本项目开发沙箱的出口 IP 已实证）。
 - **国内 IP 伪装头**（活跃上游共识，Binaryify 文档原话："增加 X-Real-IP: 任意国内 IP 即可解决"）：
   显式 `NE_REAL_IP=211.161.244.70`，或 `NE_RANDOM_CN_IP=1` 每次自动生成国内 IP
   （api-enhanced 的 `randomCNIP`、Meting-API 的 `cnip()` 同款，均同时注入 `X-Real-IP` + `X-Forwarded-For`）。
