@@ -110,7 +110,7 @@ int main(void) {
 | 1 | `ne_http_set_transport(cb)` | 无 curl 平台 | 任何请求前；NULL 恢复 curl |
 | 2 | `ne_set_api_base(base)` | **嵌入式宿主（Android 等）** | Android 无环境变量可用，`request.h` 要求启动时显式调用。默认 `https://music.163.com`；入参被内部复制（strdup），调用后可释放 |
 | 3 | `ne_set_cookie_file(path)` | 长期进程 | 指定 Netscape cookies.txt 位置并 reload；CLI 默认 `~/.cache/netune/cookies.txt` |
-| 4 | `ne_jar_import_cookies(str)` | 可选 | 合并浏览器导出的 `"MUSIC_U=…; __csrf=…"` 串并落盘（线程安全）；`ne_jar_reload()` 可再重读文件 |
+| 4 | `ne_jar_import_cookies(str)` | 可选 | 合并浏览器导出的 `"MUSIC_U=…; __csrf=…"` 串并落盘（线程安全）；`ne_jar_reload()` 可再重读文件。响应里的 Set-Cookie 也会自动落盘，见 §7 |
 | 5 | 风控开关（§6） | 可选 | setter / 环境变量 |
 
 ### 3.2 `ne_resp` 语义（重点，两条路径行为不同）
@@ -161,7 +161,7 @@ typedef struct {
 - 全局 cookie jar 由**内部 mutex** 保护；多线程并发调用服务函数**安全且并行**（HTTP I/O 不持锁，c38c41f 起）。
 - 例外：`ne_global_jar()` 返回**活句柄**，仅供 CLI 这种单线程宿主在进程退出时持久化；多线程宿主不要在调用返回后继续使用该句柄。
 - `ne_jar_import_cookies()` 线程安全（jar 锁 + 落盘在锁内），可随时调。
-- Set-Cookie 消费发生在响应对象上，无共享回传通道 —— 并发请求各自的 cookie 回写互不干扰。
+- Set-Cookie 消费发生在响应对象上，无共享回传通道 —— 并发请求各自的 cookie 回写互不干扰（合并后按内容指纹决定是否落盘，写盘同样在 jar 锁内，见 §7）。
 
 ## 4. 服务清单（52 个函数，按家族分组）
 
@@ -308,7 +308,13 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
 
 - 持久化格式：Netscape cookies.txt（`# Netscape HTTP Cookie File` 头）。
 - 登录态核心 cookie：`MUSIC_U`（长效登录令牌）、`__csrf`；服务端下发的 `NMTID` 参与风控（见 §8）。
-- 桌面：CLI 自动 load/save。嵌入式：`ne_set_cookie_file()` 指到应用私有目录，`ne_jar_import_cookies()` 从 WebView 导出的 cookie 串导入（nume 的网页登录即此方案）。
+- 桌面：CLI 自动 load/save。嵌入式：`ne_set_cookie_file()` 指到应用私有目录，`ne_jar_import_cookies()` 从 WebView 导出的 cookie 串导入（Android 宿主 nume/Cirro 的网页登录即此方案）。
+- **落盘时机（2026-10-07 补齐）**：① 导入 cookie 时（`ne_jar_import_cookies`，无条件写）；
+  ② 任何**响应带 Set-Cookie** 时（`jar_sync_set_cookies` 合并后按内容指纹判断，变了才写）。
+  以前只有 ①，于是服务端在响应里轮转的 `MUSIC_U` 续期 / `__csrf` 重发只活在内存，冷启动
+  load 回来是旧值 —— 嵌入式宿主（只在一处导入 cookie、之后全靠响应维护登录态）会吃到写操作
+  被判失效的亏。播放场景的 GET 很频繁，所以 ② 既只在真收到 Set-Cookie 时触发，又用
+  `ne_jar_cookie_header()` 的内容指纹挡一道，内容没变不写盘。
 - `filterJar` 语义（cookiejar.c）：反欺诈策略写入的**假 NMTID**（`some_random_id_from_strategy`）与 cookie 属性段（`Expires=` 等带 = 的部分）不会进入 jar / 不会落盘。
 
 ## 8. 已知限制与风险（2026-10-05 审计，对照权威上游在线核对）

@@ -44,6 +44,9 @@ static const char *choose_ua(void) {
 
 static ne_jar *g_jar = NULL;
 static char   *g_cookie_path = NULL;
+/* Content fingerprint of the last successful ne_jar_save_file() (guarded by
+ * g_jar_lock). Lets the Set-Cookie path skip redundant disk writes. */
+static char   *g_cookie_fp = NULL;
 
 /* Guards the process-global jar against concurrent request threads. Any read
  * that feeds values used beyond the lock scope (ne_call_eapi's extras, for
@@ -107,6 +110,29 @@ static void init_jar_locked(void) {
     }
 }
 
+/* Persist the global jar to g_cookie_path. MUST be called with g_jar_lock held.
+ *
+ * 2026-10-07: 此前只有 ne_jar_import_cookies() 落盘，服务端在**响应里轮转**的
+ * cookie（MUSIC_U 续期、__csrf 重发）只活在内存 ⇒ 冷启动 reload 回来的是旧值，
+ * 写操作（点赞 / 收藏）可能拿着过期 csrf 被拒。Android 宿主尤其吃到这个亏：
+ * 它只在一处导入 cookie，之后全靠请求响应维护登录态。
+ *
+ * 只在真的收到 Set-Cookie 时才走到这里，中间还用内容指纹挡一道：没变化就不
+ * 写盘（播放场景 GET 频繁，不能每次响应都做 IO）。force=1 用于导入路径——
+ * 第一次导入必须落盘，不管指纹看起来是否"没变"。 */
+static void jar_persist_locked(int force) {
+    if (!g_cookie_path || !*g_cookie_path || !g_jar) return;
+    char *fp = ne_jar_cookie_header(g_jar);
+    if (!fp) return;
+    if (!force && g_cookie_fp && strcmp(fp, g_cookie_fp) == 0) {
+        free(fp);
+        return;
+    }
+    free(g_cookie_fp);
+    g_cookie_fp = fp;
+    ne_jar_save_file(g_jar, g_cookie_path);
+}
+
 /* Hard reload from disk. The request pipeline uses init-on-first-access
  * (init_jar_locked) rather than constant reloads; this is the CLI persist /
  * refresh path. */
@@ -114,6 +140,8 @@ void ne_jar_reload(void) {
     jar_lock();
     if (g_jar) ne_jar_free(g_jar);
     g_jar = NULL;
+    free(g_cookie_fp);        /* jar 换了一份，旧指纹不能再认 */
+    g_cookie_fp = NULL;
     init_jar_locked();
     jar_unlock();
 }
@@ -148,7 +176,10 @@ static char *jar_cookie_header_alloc(void) {
 
 /* Merge Set-Cookie lines delivered by the transport directly from the
  * response object — no thread-local back-channel (see the thread contract
- * note in request.h). */
+ * note in request.h).
+ *
+ * 落盘放在这里（而不是"每次请求结束"）：只有服务端真的轮转了 cookie 才需要
+ * 持久化，而带 Set-Cookie 的响应是少数。写盘条件是内容指纹有变化。 */
 static void jar_sync_set_cookies(const char *set_cookies) {
     if (!set_cookies || !*set_cookies) return;
     char *copy = ne_xstrdup(set_cookies);
@@ -158,6 +189,7 @@ static void jar_sync_set_cookies(const char *set_cookies) {
     for (char *line = strtok_r(copy, "\n", &save); line;
          line = strtok_r(NULL, "\n", &save))
         ne_jar_merge_cookie_str(g_jar, line);
+    jar_persist_locked(0);
     jar_unlock();
     free(copy);
 }
@@ -662,7 +694,6 @@ void ne_jar_import_cookies(const char *cookie_str) {
     jar_lock();
     if (!g_jar) init_jar_locked();
     ne_jar_merge_cookie_str(g_jar, cookie_str);
-    const char *path = g_cookie_path;
-    if (path && *path) ne_jar_save_file(g_jar, path);
+    jar_persist_locked(1);   /* 导入必须落盘：不管指纹看起来变没变 */
     jar_unlock();
 }
