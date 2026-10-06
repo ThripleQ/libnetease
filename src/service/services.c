@@ -267,12 +267,16 @@ ne_resp *ne_song_detail(const char *ids_csv) {
 
 /* playlist_detail_service.go 复刻为 linuxapi+v3；2026-09 审计后平移 weapi+v6，
  * 对齐活跃上游 api-enhanced (playlist_detail.js: /api/v6/playlist/detail) ——
- * linuxapi 通道已弃用（上游生产模块零使用），weapi 为网页端原生路径。 */
-ne_resp *ne_playlist_detail(const char *id, const char *s) {
+ * linuxapi 通道已弃用（上游生产模块零使用），weapi 为网页端原生路径。
+ *
+ * `n` 空 → "100000"（与上游默认一致）；传 "0" 可得「元数据 + 完整 trackIds」的
+ * 轻量形态，用作「曲目有没有变」的检查（见 services.h 的说明）。 */
+ne_resp *ne_playlist_detail(const char *id, const char *s, const char *n) {
     if (!s || !*s) s = "8";
+    if (!n || !*n) n = "100000";
     jmap *data = jmap_new();
     jmap_put(data, "id", id);
-    jmap_put(data, "n", "100000");
+    jmap_put(data, "n", n);
     jmap_put(data, "s", s);
     char url[640];
     snprintf(url, sizeof url, "%s/weapi/v6/playlist/detail", ne_api_base());

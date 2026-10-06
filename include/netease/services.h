@@ -59,8 +59,14 @@ ne_resp *ne_album_detail(const char *id);
 ne_resp *ne_song_detail(const char *ids_csv);
 
 /* PlaylistDetailService — weapi v6/playlist/detail, data
- * {id, n=100000, s} (s empty → "8"). 2026-09: was linuxapi v3. */
-ne_resp *ne_playlist_detail(const char *id, const char *s);
+ * {id, n, s} (s empty → "8"; n empty → "100000"). 2026-09: was linuxapi v3.
+ *
+ * `n` 是「回几首曲目详情」，但它**不截断 playlist.trackIds** —— 实测（2026-10-06）
+ * n=0 与 n=100000 返回的 trackIds 完全一致，2213 首的歌单也全给 2213 个。所以
+ * n=0 可当「轻量检查」用：只回元数据 + 完整 id 列表（约全量的 7~15%，无需解析
+ * 歌曲、无需写库），用来判歌单曲目有没有变，没变就不必拉全量。
+ * ⚠️ 别拿 playlist.trackUpdateTime 当判据：服务端按请求现算，每次调用都变。 */
+ne_resp *ne_playlist_detail(const char *id, const char *s, const char *n);
 
 /* UserPlaylistService — weapi/user/playlist, limit/offset empty → 30/0 */
 ne_resp *ne_user_playlist(const char *uid, const char *limit,

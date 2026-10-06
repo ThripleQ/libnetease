@@ -223,7 +223,7 @@ int cmd_playlists(void) {
 }
 
 int cmd_playlist_cover(const char *id) {
-    ne_resp *r = ne_playlist_detail(id, "0");
+    ne_resp *r = ne_playlist_detail(id, "0", NULL);
     ne_jval *root = NULL;
     if (!cli_parse_root(r->body, &root)) {
         cli_output(r->body);
@@ -290,7 +290,7 @@ int cmd_lyric(const char *id) {
 }
 
 int cmd_playlist_tracks(const char *id) {
-    ne_resp *r = ne_playlist_detail(id, "0");
+    ne_resp *r = ne_playlist_detail(id, "0", NULL);
     ne_jval *root = NULL;
     if (!cli_parse_root(r->body, &root)) {
         cli_output(r->body);

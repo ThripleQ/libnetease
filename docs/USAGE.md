@@ -191,7 +191,7 @@ typedef struct {
 
 | 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
 |---|---|---|---|---|
-| `ne_playlist_detail(id,s)` | `/weapi/v6/playlist/detail` | W | n=100000；s 空 → "8" | ✗ |
+| `ne_playlist_detail(id,s,n)` | `/weapi/v6/playlist/detail` | W | n 空 → 100000；s 空 → "8"；**n=0 = 轻量检查**（元数据 + 完整 trackIds，约全量 7~15%） | ✗ |
 | `ne_user_playlist(uid,limit,offset)` | `/weapi/user/playlist` | W | 空 → 30/0 | ✗ |
 | `ne_toplist_detail(void)` | `/weapi/toplist/detail` | W | | ✗ |
 | `ne_recommend_resource(void)` | `/weapi/v1/discovery/recommend/resource` | W | | ✓ |

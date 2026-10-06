@@ -202,7 +202,7 @@ int main(int argc, char **argv) {
         rc = cli_pass(ne_song_detail(argv[2]));
     } else if (strcmp(cmd, "playlist") == 0) {
         if (argc < 3) cli_die("usage: netease-cli playlist <id>");
-        rc = cli_pass(ne_playlist_detail(argv[2], "0"));
+        rc = cli_pass(ne_playlist_detail(argv[2], "0", NULL));
     } else if (strcmp(cmd, "playlist-cover") == 0) {
         if (argc < 3) cli_die("usage: netease-cli playlist-cover <id>");
         rc = cmd_playlist_cover(argv[2]);
