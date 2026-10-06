@@ -854,3 +854,92 @@ ne_resp *ne_simi_artist(const char *artist_id) {
     jmap_free(data);
     return r;
 }
+
+/* ══ 收藏 / 点赞 family（2026-10-06，占位按钮接线） ═════════════════
+ *
+ * 这一族都是**写**接口，共用两条通用纪律：
+ *
+ * ① **看 code 不够，必须看 message**。服务端在 HTTP 200 里回业务错：
+ *    下架歌曲点赞返 `{"code":401,"message":"下架歌曲无法收藏"}`（探针实测
+ *    曲目 186016）。所以调用方拿到的 ne_resp 既不是 err != 0 也不是
+ *    非 200 code —— 必须把 body 里的 message 透到 UI，否则用户面前就是
+ *    「点了没反应」。见 nume 侧 InteractionRepository 的 ActionResult。
+ *
+ * ② **往返语义**：四条都是「设成目标态」而不是「切换」。重复调用幂等
+ *    （对已取消的歌再调 unlike 仍返 200），所以客户端可以放心乐观更新 +
+ *    失败回滚，不必先读后写。
+ */
+
+/* song_like.js — /api/song/like {trackId, like}。
+ *
+ * **口径跟 CLI 的 `like` 命令一致**（src/cli/cmd_write.c:cmd_like）：like 传
+ * 字符串 "true"/"false"，并带 `os=pc appver=2.7.1.198277`。库里同一个端点只能有
+ * 一种写法 —— 探针实测布尔值也一样能用（服务端两种都收），但既然 CLI 那条路径
+ * 已经过 dualrun 逐字节比对，这里就跟着它，别造第二种方言。
+ *
+ * 成功返 `{"playlistId": <"我喜欢的音乐"歌单id>, "code":200}`
+ * （注意该 playlistId ≠ uid，别拿 uid 当「喜欢」歌单的 id 用）。
+ * 失败藏在 message 里：下架歌曲返 `{"code":401,"message":"下架歌曲无法收藏"}`。
+ *
+ * userid **不必传**：上游 query.uid 缺省时该字段被丢掉，探针实测不带 userid
+ * 的 like/unlike 都正常。所以 C 层不引入对 uid 的依赖，调用方不必先查账号。 */
+ne_resp *ne_song_like(const char *track_id, const char *like) {
+    jmap *data = jmap_new();
+    jmap_put(data, "trackId", track_id);
+    jmap_put(data, "like", (like && *like) ? like : "true");
+    static const char *extras[] = { "os", "pc", "appver", "2.7.1.198277", NULL };
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/song/like", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, extras);
+    jmap_free(data);
+    return r;
+}
+
+/* comment_like.js — /api/v1/comment/{like|unlike} {threadId, commentId}。
+ * threadId 就是评论族那套资源线程序号（R_SO_4_ / A_PL_0_ / R_AL_3_…）。
+ * like 为空或非 "1" 时走 unlike；成功返 `{"code":200}`。 */
+ne_resp *ne_comment_like(const char *thread_id, const char *comment_id,
+                         const char *like) {
+    jmap *data = jmap_new();
+    jmap_put(data, "threadId", thread_id);
+    jmap_put(data, "commentId", comment_id);
+    const char *action = (like && strcmp(like, "1") == 0) ? "like" : "unlike";
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/v1/comment/%s", ne_api_base(), action);
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* album_sub.js — /api/album/{sub|unsub} {id}。t "1" → sub，否则 unsub。
+ * 成功返 `{"code":200,"time":<毫秒>}`。
+ *
+ * 专辑详情的 album 对象里**没有** subscribed 字段（探针实测 29 个键里没有，
+ * optBoolean 得 false），所以「这张专辑收没收藏」只能查 ne_album_sublist。 */
+ne_resp *ne_album_subscribe(const char *id, const char *t) {
+    jmap *data = jmap_new();
+    jmap_put(data, "id", id);
+    const char *action = (t && strcmp(t, "1") == 0) ? "sub" : "unsub";
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/album/%s", ne_api_base(), action);
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
+/* album_sublist.js — /api/album/sublist {limit, offset, total}：已收藏专辑。
+ * 用来回答「这张专辑收没收藏」—— 返回的 data[] 里每项就是专辑对象（含 id）。
+ * total 传 JSON 布尔 true。 */
+ne_resp *ne_album_sublist(const char *limit, const char *offset) {
+    if (!limit || !*limit) limit = "100";
+    if (!offset || !*offset) offset = "0";
+    jmap *data = jmap_new();
+    jmap_put(data, "limit", limit);
+    jmap_put(data, "offset", offset);
+    jmap_put_bool(data, "total", 1);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/album/sublist", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}

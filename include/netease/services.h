@@ -260,4 +260,34 @@ ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor);
  * → 相似歌手的热门歌。**这是真正对得上语义的接口**：以前我们拿「同一歌手的
  * 热门歌」冒充相似艺人，播出来永远是种子歌手自己的歌。 */
 ne_resp *ne_simi_artist(const char *artist_id);
+
+/* ── like / subscribe family（added 2026-10-06）──────────────────────
+ * 第三方客户端那批「占位按钮」（歌单页分享/评论/收藏/排序、播放页红心、
+ * 评论点赞）里，凡是要写服务端的那几个所需端点。全部 weapi，全部走
+ * ne_create_weapi（App 实际打的 /weapi/ 前缀）。
+ * 这一族都返回 HTTP 200 + 业务码，**下架歌曲那类失败藏在 message 里**
+ * （`{"code":401,"message":"下架歌曲无法收藏"}`），调用方必须读 message。 */
+
+/* SongLikeService — /api/song/like {trackId, like}：红心 / 取消红心某首歌。
+ * like 传 "true"/"1" 表示喜欢，其余表示取消（跟上游 song_like.js 的布尔一致）。
+ * 不需要传 userid（上游 uid 缺省时该字段被丢掉，探针实测不带也正常）。
+ * 成功返 `{"playlistId": <"我喜欢的音乐"歌单id>, "code":200}`。 */
+ne_resp *ne_song_like(const char *track_id, const char *like);
+
+/* CommentLikeService — /api/v1/comment/{like|unlike} {threadId, commentId}。
+ * threadId 即评论族那套资源序号（R_SO_4_ / A_PL_0_ / R_AL_3_…）。
+ * like "1" → 点赞，否则取消；成功返 `{"code":200}`。 */
+ne_resp *ne_comment_like(const char *thread_id, const char *comment_id,
+                         const char *like);
+
+/* AlbumSubscribeService — /api/album/{sub|unsub} {id}：收藏 / 取消收藏专辑。
+ * t "1" → sub，否则 unsub；成功返 `{"code":200,"time":<毫秒>}`。
+ * 专辑详情里没有 subscribed 字段，要判状态请配 ne_album_sublist。 */
+ne_resp *ne_album_subscribe(const char *id, const char *t);
+
+/* AlbumSublistService — /api/album/sublist {limit, offset, total}：
+ * 已收藏的专辑（data[] 里每项是专辑对象，含 id）。limit 空 → "100"。
+ * 用途是回答「这张专辑收没收藏」，不是做完整的收藏管理页。 */
+ne_resp *ne_album_sublist(const char *limit, const char *offset);
+
 #endif

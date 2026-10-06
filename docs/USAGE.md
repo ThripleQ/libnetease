@@ -13,7 +13,7 @@
 
 ```
 ┌─ 服务层 (src/service/) ────────────────────────────────┐
-│ ne_search / ne_song_url_v1 / … 48 个服务函数           │
+│ ne_search / ne_song_url_v1 / … 52 个服务函数           │
 │ 每个函数 = 一次 HTTP 往返，返回原始 ne_resp             │
 ├─ 请求内核 (src/core/request.c) ────────────────────────┤
 │ 通道①weapi(create_weapi)  通道②linuxapi  通道③eapi      │
@@ -154,7 +154,7 @@ typedef struct {
 - `ne_jar_import_cookies()` 线程安全（jar 锁 + 落盘在锁内），可随时调。
 - Set-Cookie 消费发生在响应对象上，无共享回传通道 —— 并发请求各自的 cookie 回写互不干扰。
 
-## 4. 服务清单（48 个函数，按家族分组）
+## 4. 服务清单（52 个函数，按家族分组）
 
 "通道"列：**W**=weapi(create_weapi) ｜ **W!**=weapi(call_weapi 严格) ｜ **L**=linuxapi ｜ **E**=eapi。
 "登录"列：✓ 需要登录 cookie（MUSIC_U）；✗ 匿名可用；— 登录动作本身。
@@ -196,6 +196,8 @@ typedef struct {
 | 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
 |---|---|---|---|---|
 | `ne_album_detail(id)` | `/weapi/v1/album/<id>` | W | 专辑详情（含曲目） | ✗ |
+| `ne_album_subscribe(id,t)` | `/weapi/album/sub`/`unsub` | W | t="1" 收藏 "0" 取消（2026-10-06 新增） | ✓ |
+| `ne_album_sublist(limit,offset)` | `/weapi/album/sublist` | W | 已收藏专辑；total 恒 JSON 布尔 true；limit 空 → "100"。**专辑详情里没有 subscribed 字段**，判收藏态只能靠它（2026-10-06 新增） | ✓ |
 | `ne_artist_detail(id)` | `/weapi/v1/artist/<id>` | W | {artist, hotSongs, more}，一次取艺人+Top50热歌 | ✗ |
 | `ne_artist_songs(id,offset,limit,order)` | `/weapi/v1/artist/songs` | W | order 空 → "hot"（else "time"） | ✗ |
 | `ne_artist_albums(id,limit,offset)` | `/weapi/artist/albums/<id>` | W | total 恒 "true" | ✗ |
@@ -214,6 +216,7 @@ typedef struct {
 |---|---|---|---|---|
 | `ne_comments(thread_id,limit,offset,before_time)` | `/weapi/v1/resource/comments/<thread_id>` | W | thread 前缀：song `R_SO_4`/album `R_AL_3`/playlist `A_PL_0`/program `R_VI_62` | ✗ |
 | `ne_comments_hot(thread_id,limit,offset,before_time)` | `/weapi/v1/resource/hotcomments/<thread_id>` | W | 同侪「热门」标签 | ✗ |
+| `ne_comment_like(thread_id,comment_id,like)` | `/weapi/v1/comment/like`/`unlike` | W | like "1" 点赞，否则取消；threadId 与 `ne_comments` 同前缀（2026-10-06 新增） | ✓ |
 
 ### 4.6 探索页 / 首页（2026-10-04 新增，api-enhanced 现行 module）
 
@@ -235,6 +238,7 @@ typedef struct {
 | 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
 |---|---|---|---|---|
 | `ne_like_list(uid)` | `/weapi/song/like/get` | W | 红心歌曲清单 | ✓ |
+| `ne_song_like(track_id,like)` | `/weapi/song/like` | W | like 字符串 "true"/"false" + `os=pc appver=2.7.1.198277`，**与 CLI 的 `like` 命令同方言**（2026-10-06 新增）；成功返 `{"playlistId":<"我喜欢的音乐"id>}`，注意它不是 uid | ✓ |
 | `ne_record_recent(limit)` | `/weapi/play-record/song/list` | W | limit 空 → "100" | ✓ |
 | `ne_user_account(void)` | `/weapi/w/nuser/account/get` | W | 903d337 起（旧路径已失效） | ✓ |
 | `ne_vip_info(void)` | `/weapi/music-vip-membership/front/vip/info` | **W!** | 钉自 Binaryify `vip_info.js`；redVipLevel/redVipExpireTime/musicPackage | ✓ |
@@ -309,5 +313,14 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
    - `ne_playlist_list` / `ne_playlist_catalogue`：对应上游 `top_playlist.js` / `playlist_catlist.js`（均 weapi），与库一致。
    - `ne_comments` / `ne_comments_hot`：上游现行 module 已迁移到 **v2 eapi**（`/api/v2/resource/comments`，threadId 放 body、分页用 pageNo/pageSize/cursor）；本库仍是 **v1 weapi**（threadId 放路径、offset+beforeTime 分页）。v1 仍可正常返回，但对齐上游的长期方向是 v2。thread 前缀（`R_SO_4_`/`A_PL_0_` 等）两种版本一致，调用方无感。
    - `ne_radio_get`：无独立上游 module（上游把它塞进 `personal_fm.js` 的 `/api/v1/radio/get` 空 data）；本库模式（mode/subMode 扩展 + cookie os=ios）为 nume 侧增强，端点同源可行。
+5. **点赞 / 收藏一族（2026-10-06 新增，登录态探针逐条实测）**：
+   - `ne_song_like`：不带 `userid` 也能用（上游 uid 缺省时该字段被丢掉），所以本函数签名里没有 uid。
+     成功返 `{"playlistId": 7238603648, "code":200}` —— **那个 playlistId ≠ uid**（实测 uid 6393271458 对应歌单 7238603648），
+     别拿 uid 当「我喜欢的音乐」的 id。
+   - **失败藏在 message 里**：对下架歌曲点赞，服务端回 HTTP 200 + `{"code":401,"message":"下架歌曲无法收藏"}`。
+     调用方只看 `err` / 200 判不出任何东西 —— nume 侧统一由 `InteractionRepository` 把 message 抽出来给用户看。
+   - `ne_album_sublist` / `ne_song_like` / `ne_comment_like` / `ne_album_subscribe` 四条都是**「设成目标态」而非「切换」**，
+     重复调幂等（对已取消的歌再调 unlike 仍返 200），客户端可以乐观更新 + 失败回滚，不必先读后写。
+   - `ne_album_sublist` 单页 limit 100：它是给「本地查表判收藏态」用的，不是收藏管理页；收藏专辑超过 100 张的账号会漏判。
 
 服务行为与 `services.h` 注释有出入时**以 services.c 为准**。
