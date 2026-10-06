@@ -197,7 +197,7 @@ typedef struct {
 |---|---|---|---|---|
 | `ne_album_detail(id)` | `/weapi/v1/album/<id>` | W | 专辑详情（含曲目） | ✗ |
 | `ne_album_subscribe(id,t)` | `/weapi/album/sub`/`unsub` | W | t="1" 收藏 "0" 取消（2026-10-06 新增） | ✓ |
-| `ne_album_sublist(limit,offset)` | `/weapi/album/sublist` | W | 已收藏专辑；total 恒 JSON 布尔 true；limit 空 → "100"。**专辑详情里没有 subscribed 字段**，判收藏态只能靠它（2026-10-06 新增） | ✓ |
+| `ne_album_sublist(limit,offset)` | `/weapi/album/sublist` | W | 已收藏专辑；total 恒 JSON 布尔 true；limit 空 → "25"（同上游默认）。**专辑详情里没有 subscribed 字段**，判收藏态只能靠它（2026-10-06 新增） | ✓ |
 | `ne_artist_detail(id)` | `/weapi/v1/artist/<id>` | W | {artist, hotSongs, more}，一次取艺人+Top50热歌 | ✗ |
 | `ne_artist_songs(id,offset,limit,order)` | `/weapi/v1/artist/songs` | W | order 空 → "hot"（else "time"） | ✗ |
 | `ne_artist_albums(id,limit,offset)` | `/weapi/artist/albums/<id>` | W | total 恒 "true" | ✗ |
@@ -238,7 +238,7 @@ typedef struct {
 | 函数 | 端点（重写后实际路径） | 通道 | 参数 | 登录 |
 |---|---|---|---|---|
 | `ne_like_list(uid)` | `/weapi/song/like/get` | W | 红心歌曲清单 | ✓ |
-| `ne_song_like(track_id,like)` | `/weapi/song/like` | W | like 字符串 "true"/"false" + `os=pc appver=2.7.1.198277`，**与 CLI 的 `like` 命令同方言**（2026-10-06 新增）；成功返 `{"playlistId":<"我喜欢的音乐"id>}`，注意它不是 uid | ✓ |
+| `ne_song_like(track_id,like)` | `/weapi/song/like` | W | like 只传字符串 "true"/"false" + `os=pc appver=2.7.1.198277`，**与 CLI 的 `like` 命令同方言**（上游这条默认走 eapi，差异见 §8.5）；成功返 `{"playlistId":<"我喜欢的音乐"id>}`，注意它不是 uid（2026-10-06 新增） | ✓ |
 | `ne_record_recent(limit)` | `/weapi/play-record/song/list` | W | limit 空 → "100" | ✓ |
 | `ne_user_account(void)` | `/weapi/w/nuser/account/get` | W | 903d337 起（旧路径已失效） | ✓ |
 | `ne_vip_info(void)` | `/weapi/music-vip-membership/front/vip/info` | **W!** | 钉自 Binaryify `vip_info.js`；redVipLevel/redVipExpireTime/musicPackage | ✓ |
@@ -314,13 +314,39 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
    - `ne_comments` / `ne_comments_hot`：上游现行 module 已迁移到 **v2 eapi**（`/api/v2/resource/comments`，threadId 放 body、分页用 pageNo/pageSize/cursor）；本库仍是 **v1 weapi**（threadId 放路径、offset+beforeTime 分页）。v1 仍可正常返回，但对齐上游的长期方向是 v2。thread 前缀（`R_SO_4_`/`A_PL_0_` 等）两种版本一致，调用方无感。
    - `ne_radio_get`：无独立上游 module（上游把它塞进 `personal_fm.js` 的 `/api/v1/radio/get` 空 data）；本库模式（mode/subMode 扩展 + cookie os=ios）为 nume 侧增强，端点同源可行。
 5. **点赞 / 收藏一族（2026-10-06 新增，登录态探针逐条实测）**：
-   - `ne_song_like`：不带 `userid` 也能用（上游 uid 缺省时该字段被丢掉），所以本函数签名里没有 uid。
+   - `ne_song_like` 的**通道与上游不同，是有意选的**：上游 `song_like.js` 用默认
+     `createOption(query)`，按 `request.js` 的 `APP_CONF.encrypt ? 'eapi' : 'api'`
+     和 `config.json` 里 `encrypt: true`，实际走 **eapi**；而 `comment_like` /
+     `album_sub` / `album_sublist` 三条在上游是显式 `createOption(query,'weapi')`，
+     本库与之一致。song_like 本库仍走 **weapi**（跟库内 CLI 的 `cmd_like` 先例同方言，
+     探针带登录态实测双向都生效）。**未尽事项：这条没在真机上抓过 App 实际打的 URL**，
+     上游只是第三方 Node 实现、CLI 只是先例，都不算最终裁判；日后若行为异常，
+     先 `adb logcat -s NumeHttp` 看 `--> POST` 确认走 /weapi 还是 /eapi，再决定是否
+     照 `ne_playlist_update_name` 改用 eapi 通道。
+   - `ne_song_like` 的 `like` **只接受字符串 "true" / "false"**（本层透传给服务端判定，
+     不替它兜底）。上游是在客户端转布尔 `like = query.like !== 'false'`（语义还相反：
+     **只有**恰好 'false' 才取消，其余一律算喜欢），本库选字符串是为了跟 CLI 先例一致。
+   - `ne_song_like` 不带 `userid` 也能用：上游写的是 `userid: query.uid`（**无条件带上**），
+     uid 为 undefined 时才被 JSON.stringify 丢掉 —— 那是序列化行为，不是上游特意省略。
+     实测不带 userid 的 like/unlike 都正常（服务端认 cookie 里的 MUSIC_U）。
      成功返 `{"playlistId": 7238603648, "code":200}` —— **那个 playlistId ≠ uid**（实测 uid 6393271458 对应歌单 7238603648），
      别拿 uid 当「我喜欢的音乐」的 id。
    - **失败藏在 message 里**：对下架歌曲点赞，服务端回 HTTP 200 + `{"code":401,"message":"下架歌曲无法收藏"}`。
      调用方只看 `err` / 200 判不出任何东西 —— nume 侧统一由 `InteractionRepository` 把 message 抽出来给用户看。
+   - **这三条写端点只在 `/weapi/` 上有实现**（2026-10-06 双前缀对照实测，只换前缀同一份数据）：
+     `/weapi/song/like` 200 ／ `/api/song/like` **400 请求参数错误**；
+     `/weapi/album/sub` 200 ／ `/api/album/sub` **400 参数错误**；
+     `/weapi/v1/comment/unlike` 200 ／ `/api/v1/comment/unlike` **400 参数错误**；
+     只有只读的 `ne_album_sublist` 是两前缀都通。所以这几个函数只能配
+     `ne_create_weapi`（含 api 段重写），**别换成 `ne_create_weapi_asis` 去试老网关**。
+     这与 style-tag 系列（只在 /weapi，打 /api 返 400）属同一类现象。
    - `ne_album_sublist` / `ne_song_like` / `ne_comment_like` / `ne_album_subscribe` 四条都是**「设成目标态」而非「切换」**，
-     重复调幂等（对已取消的歌再调 unlike 仍返 200），客户端可以乐观更新 + 失败回滚，不必先读后写。
-   - `ne_album_sublist` 单页 limit 100：它是给「本地查表判收藏态」用的，不是收藏管理页；收藏专辑超过 100 张的账号会漏判。
+     重复调幂等（对已取消的歌再调 unlike 仍返 200；对已收藏的专辑再 sub 返
+     `{"code":200,"message":"该专辑已经在用户收藏列表中"}` —— **200 也带 message，但那是「已在目标态」，不是失败**）。
+     客户端可以乐观更新 + 失败回滚，不必先读后写。推论：读 message 必须配 code 一起判，
+     别把 200 的 message 也当错误弹给用户（nume 侧 `InteractionRepository.interpret` 正是 `code==200 → Ok`）。
+   - `ne_album_sublist` 的 **limit 默认 "25"（同上游 `query.limit || 25`）**；nume 侧判收藏态时
+     显式传 "100"（`LibraryStateStore.fetchSubscribedAlbumIds`）。它是给「本地查表」用的，
+     不是收藏管理页；收藏专辑超过单页上限的账号会漏判，要拉全得调用方自己分页累积。
 
 服务行为与 `services.h` 注释有出入时**以 services.c 为准**。

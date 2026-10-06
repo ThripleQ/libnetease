@@ -263,31 +263,40 @@ ne_resp *ne_simi_artist(const char *artist_id);
 
 /* ── like / subscribe family（added 2026-10-06）──────────────────────
  * 第三方客户端那批「占位按钮」（歌单页分享/评论/收藏/排序、播放页红心、
- * 评论点赞）里，凡是要写服务端的那几个所需端点。全部 weapi，全部走
- * ne_create_weapi（App 实际打的 /weapi/ 前缀）。
+ * 评论点赞）里，凡是要写服务端的那几个所需端点。四条全部走 ne_create_weapi
+ * （App 实际打的 /weapi/ 前缀）；上游 comment_like / album_sub / album_sublist
+ * 三条显式要求 weapi，与本库一致；只有 song_like 上游默认落 eapi，本库仍用 weapi
+ * （跟库内 CLI 先例一致 + 探针实测可用）—— 差异与未尽事项详见 services.c 该函数注释。
  * 这一族都返回 HTTP 200 + 业务码，**下架歌曲那类失败藏在 message 里**
  * （`{"code":401,"message":"下架歌曲无法收藏"}`），调用方必须读 message。 */
 
 /* SongLikeService — /api/song/like {trackId, like}：红心 / 取消红心某首歌。
- * like 传 "true"/"1" 表示喜欢，其余表示取消（跟上游 song_like.js 的布尔一致）。
- * 不需要传 userid（上游 uid 缺省时该字段被丢掉，探针实测不带也正常）。
+ * like **只传 "true" 或 "false"**（字符串透传给服务端判定；上游是在客户端转布尔，
+ * 本库跟 CLI 先例走字符串，别的一律不要传 —— 只有这两个值实测过）。
+ * 不需要传 userid（上游无条件带 query.uid，本库不带也实测正常，服务端认 cookie）。
  * 成功返 `{"playlistId": <"我喜欢的音乐"歌单id>, "code":200}`。 */
 ne_resp *ne_song_like(const char *track_id, const char *like);
 
 /* CommentLikeService — /api/v1/comment/{like|unlike} {threadId, commentId}。
- * threadId 即评论族那套资源序号（R_SO_4_ / A_PL_0_ / R_AL_3_…）。
- * like "1" → 点赞，否则取消；成功返 `{"code":200}`。 */
+ * threadId 即评论族那套资源序号（R_SO_4_ / A_PL_0_ / R_AL_3_…，见上游
+ * util/config.json 的 resourceTypeMap）。
+ * like "1" → 点赞，否则取消；成功返 `{"code":200}`。
+ * 上游 `query.t == 1 ? 'like' : 'unlike'`（**松散**比较，数字 1 / 字符串 "1" /
+ * 布尔 true 都算真），本层只认字符串 "1" —— 比上游严，JNI 传进来的就是字符串，
+ * 够用且不会误判。 */
 ne_resp *ne_comment_like(const char *thread_id, const char *comment_id,
                          const char *like);
 
 /* AlbumSubscribeService — /api/album/{sub|unsub} {id}：收藏 / 取消收藏专辑。
- * t "1" → sub，否则 unsub；成功返 `{"code":200,"time":<毫秒>}`。
+ * t "1" → sub，否则 unsub（与上游 `query.t == 1 ? 'sub' : 'unsub'` 同构，
+ * 也跟库内既有 ne_playlist_subscribe 写法一致）；成功返 `{"code":200,"time":<毫秒>}`。
  * 专辑详情里没有 subscribed 字段，要判状态请配 ne_album_sublist。 */
 ne_resp *ne_album_subscribe(const char *id, const char *t);
 
 /* AlbumSublistService — /api/album/sublist {limit, offset, total}：
- * 已收藏的专辑（data[] 里每项是专辑对象，含 id）。limit 空 → "100"。
- * 用途是回答「这张专辑收没收藏」，不是做完整的收藏管理页。 */
+ * 已收藏的专辑（data[] 里每项是专辑对象，含 id）。limit 空 → "25"（同上游默认）。
+ * 用途是回答「这张专辑收没收藏」，不是做完整的收藏管理页 —— 要拉全得调用方传大
+ * limit 并自己分页累积。 */
 ne_resp *ne_album_sublist(const char *limit, const char *offset);
 
 #endif

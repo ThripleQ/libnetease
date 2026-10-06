@@ -865,24 +865,63 @@ ne_resp *ne_simi_artist(const char *artist_id) {
  *    非 200 code —— 必须把 body 里的 message 透到 UI，否则用户面前就是
  *    「点了没反应」。见 nume 侧 InteractionRepository 的 ActionResult。
  *
- * ② **往返语义**：四条都是「设成目标态」而不是「切换」。重复调用幂等
- *    （对已取消的歌再调 unlike 仍返 200），所以客户端可以放心乐观更新 +
- *    失败回滚，不必先读后写。
+ * ② **必须走 /weapi，不是可选项**。2026-10-06 双前缀对照（同一份数据，只换前缀，
+ *    登录态探针）：
+ *      /weapi/song/like            → 200
+ *      /api/song/like              → 400 请求参数错误
+ *      /weapi/album/sub            → 200
+ *      /api/album/sub              → 400 参数错误
+ *      /weapi/v1/comment/unlike    → 200
+ *      /api/v1/comment/unlike      → 400 参数错误
+ *      /weapi/album/sublist        → 正常    ← 只有这条只读端点两前缀都通
+ *    三条写端点只在 /weapi 上有实现，老网关 /api 直接判参数错（跟 style-tag 系列
+ *    同一类现象）。所以这几个函数**只能用 ne_create_weapi**（它把路径里的 api 段
+ *    重写成 /weapi/）；别为了「试试老网关」换成 ne_create_weapi_asis。
+ *
+ * ③ **往返语义**：四条都是「设成目标态」而不是「切换」。重复调用幂等 —— 对已取消
+ *    的歌再调 unlike 仍返 200；对已收藏的专辑再 sub 返
+ *    `{"code":200,"message":"该专辑已经在用户收藏列表中"}`（**200 也带 message，
+ *    但那是「已经在目标态」，不是失败**）。所以客户端可以放心乐观更新 + 失败回滚，
+ *    不必先读后写。注意上一条纪律的推论：读 message 时要配合 code 一起判，
+ *    别把 200 的 message 也当错误弹给用户。
  */
 
-/* song_like.js — /api/song/like {trackId, like}。
+/* song_like.js — /api/song/like {trackId, like}。三处与上游的出入，都是查过
+ * 出处后有意选的，不是遗漏：
  *
- * **口径跟 CLI 的 `like` 命令一致**（src/cli/cmd_write.c:cmd_like）：like 传
- * 字符串 "true"/"false"，并带 `os=pc appver=2.7.1.198277`。库里同一个端点只能有
- * 一种写法 —— 探针实测布尔值也一样能用（服务端两种都收），但既然 CLI 那条路径
- * 已经过 dualrun 逐字节比对，这里就跟着它，别造第二种方言。
+ * ① **通道**：上游 `createOption(query)` 没写 crypto，落到 request.js:220 的
+ *    `APP_CONF.encrypt ? 'eapi' : 'api'`，而 util/config.json 里 `encrypt: true`
+ *    —— 也就是说上游这条实际走 **eapi**，跟 comment_like / album_sub /
+ *    album_sublist 那三条显式 `createOption(query, 'weapi')` 不一样。
+ *    本库有 eapi 通道（ne_call_eapi，在用的先例是 ne_playlist_update_name），
+ *    但这里仍选 weapi，两条理由：
+ *      · 跟库内既有方言 —— CLI 的 cmd_like 就是 weapi，注释写明是照抄原 shell
+ *        的行为（os=pc appver=2.7.1.198277）；
+ *      · 探针带登录态实测 /weapi/song/like **双向都生效**（like=true/false 各一次，
+ *        改完立刻还原），功能上无缺口。
+ *    ⚠ 未做的一步：**这条没有在真机上抓过 App 实际打的 URL**（`adb logcat -s
+ *    NumeHttp` 看 `--> POST`）。上游是第三方 Node 实现、CLI 是先例，两者都不是
+ *    最终裁判；若将来某天发现 weapi 行为异常，第一件事是抓包确认官方走的是
+ *    /weapi 还是 /eapi/song/like，再决定要不要照 ne_playlist_update_name 改成 eapi。
+ *
+ * ② **like 的类型与语义**：上游 `like = query.like !== 'false'` 在**客户端**转成
+ *    JSON 布尔（且语义是「**只有**恰好 'false' 才取消，其余一律算喜欢」）；本库
+ *    跟 CLI 先例（src/cli/cmd_write.c:cmd_like）走**字符串透传**，判定在服务端。
+ *    两种都实测可用，选后者是为了跟库内既有方言一致（CLI 那条已过 dualrun 比对），
+ *    一个端点不造两种写法。
+ *    ⚠ 代价：判定责任在服务端，本层不替它兜底，所以**调用方只能传 "true" / "false"**，
+ *    别传 "0"/"1" 或别的值 —— 服务端对字符串的具体判定规则没有文档，只有这两个值
+ *    是实测过的。（对比：下面 comment_like / album_subscribe 是在**本层**判定 action，
+ *    上游也是客户端判定，那两条就没这个约束。）
+ *
+ * ③ **userid**：上游写的是 `userid: query.uid`（**无条件带上**）。说「缺省时被丢掉」
+ *    是准确的但归因要讲清 —— 那是 uid 为 undefined 时 JSON.stringify 的行为，不是
+ *    上游特意省略。本库不带它：探针实测 like/unlike 都不受影响（服务端从 cookie 的
+ *    MUSIC_U 定位账号），所以签名里不要 uid，调用方也就不必先查一次账号。
  *
  * 成功返 `{"playlistId": <"我喜欢的音乐"歌单id>, "code":200}`
  * （注意该 playlistId ≠ uid，别拿 uid 当「喜欢」歌单的 id 用）。
- * 失败藏在 message 里：下架歌曲返 `{"code":401,"message":"下架歌曲无法收藏"}`。
- *
- * userid **不必传**：上游 query.uid 缺省时该字段被丢掉，探针实测不带 userid
- * 的 like/unlike 都正常。所以 C 层不引入对 uid 的依赖，调用方不必先查账号。 */
+ * 失败藏在 message 里：下架歌曲返 `{"code":401,"message":"下架歌曲无法收藏"}`。 */
 ne_resp *ne_song_like(const char *track_id, const char *like) {
     jmap *data = jmap_new();
     jmap_put(data, "trackId", track_id);
@@ -929,9 +968,14 @@ ne_resp *ne_album_subscribe(const char *id, const char *t) {
 
 /* album_sublist.js — /api/album/sublist {limit, offset, total}：已收藏专辑。
  * 用来回答「这张专辑收没收藏」—— 返回的 data[] 里每项就是专辑对象（含 id）。
- * total 传 JSON 布尔 true。 */
+ * total 传 JSON 布尔 true（上游 `total: true`，实测这里是**布尔**而非字符串，
+ * 而 limit/offset 上游是数字字面量，经 URLSearchParams 串化后到服务端也是字符串）。 */
 ne_resp *ne_album_sublist(const char *limit, const char *offset) {
-    if (!limit || !*limit) limit = "100";
+    /* 默认值跟上游一致（album_sublist.js 的 `query.limit || 25`）。
+     * 本库的实际用途（判「这张专辑收没收藏」）想要尽量拉全，但那是**调用方**该
+     * 决定的事 —— nume 侧显式传 "100"（见 LibraryStateStore.fetchSubscribedAlbumIds），
+     * 不由本层替它把默认值改大。服务端单页上限外的收藏会漏判，要真正拉全需分页累积。 */
+    if (!limit || !*limit) limit = "25";
     if (!offset || !*offset) offset = "0";
     jmap *data = jmap_new();
     jmap_put(data, "limit", limit);
