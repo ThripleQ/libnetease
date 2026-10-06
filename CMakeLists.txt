@@ -103,6 +103,12 @@ add_executable(test_request tests/test_request.c)
 target_link_libraries(test_request PRIVATE netease)
 add_test(NAME rewrite COMMAND test_request)
 
+# Set-Cookie → 落盘：注入假传输层，不联网即可确定性触发（真机上服务端不轮转，
+# 这条路径撞不到 —— 见 tests/test_cookie_persist.c 顶部说明）
+add_executable(test_cookie_persist tests/test_cookie_persist.c)
+target_link_libraries(test_cookie_persist PRIVATE netease)
+add_test(NAME cookie_persist COMMAND test_cookie_persist)
+
 add_executable(test_qr tests/test_qr.c)
 target_link_libraries(test_qr PRIVATE netease)
 add_test(NAME qr COMMAND test_qr)
