@@ -4,7 +4,7 @@
 
 - 产物：`libnetease.a`（静态库）+ `netease-cli`（可执行文件）
 - 协议：weapi / linuxapi / eapi 三通道，加密原语自带（AES-128 / MD5 / RSA-1024 无填充 / base64 / hex）
-- 定位：netune（桌面）/ nume（Android）共用的网易云数据网关
+- 定位：netune（桌面）/ Cirro（Android）共用的网易云数据网关
 - 风控对策与上游生态调研见 [docs/RISKS.md](RISKS.md)
 
 ---
@@ -49,7 +49,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
 
 ### 2.2 嵌入式 / Android（transport 注入）
 
-平台没有 curl 时（Android NDK），**编译期关掉 curl，运行时由宿主注入传输回调**，请求内核不变。nume 即此模式（参考 `nume/app/src/main/cpp/CMakeLists.txt` 与 `libnetease_jni.c`）：
+平台没有 curl 时（Android NDK），**编译期关掉 curl，运行时由宿主注入传输回调**，请求内核不变。Cirro 即此模式（参考 `cirro/app/src/main/cpp/CMakeLists.txt` 与 `libnetease_jni.c`）：
 
 ```cmake
 # 宿主的 CMakeLists.txt
@@ -80,7 +80,7 @@ ne_http_resp {                                    /* 回调必须 malloc 返回�
 ```
 
 注意两点：
-- **回调没有 `user_data` 参数** —— 宿主状态只能通过全局变量传递（nume 的 JNI shim 用全局 `JavaVM*` attach 当前线程取 JNIEnv）。
+- **回调没有 `user_data` 参数** —— 宿主状态只能通过全局变量传递（Cirro 的 JNI shim 用全局 `JavaVM*` attach 当前线程取 JNIEnv）。
 - **Set-Cookie 必须捕获进 `resp->set_cookies`**，请求内核直接从响应对象消费，无全局回传通道。登录态（MUSIC_U / __csrf 等）全靠它回写 jar。
 
 注册：`ne_http_set_transport(&my_transport)` —— **必须在发出任何请求之前调用**；传 NULL 恢复默认 curl。
@@ -134,7 +134,7 @@ typedef struct {
 | `ne_call_weapi`，成功但 body 无数字顶层 code | **0** | 2 | body 仍可能正常 |
 | `ne_call_weapi`，成功且有 code | 业务 code | 0 | 常规 |
 
-> **坑位提醒**：判断成败请优先用 `err`，其次才看 `code`。严格路径（song_url_v1 系）的失败 code=0 与"成功但无字段"的 code=0 无法用 code 区分 —— 这是 nume 早期踩过的坑（ProfileRepository 的 workaround 注释即源于此）。
+> **坑位提醒**：判断成败请优先用 `err`，其次才看 `code`。严格路径（song_url_v1 系）的失败 code=0 与"成功但无字段"的 code=0 无法用 code 区分 —— 这是 Cirro 早期踩过的坑（ProfileRepository 的 workaround 注释即源于此）。
 > `code` 字段扫描取 body 中**第一个** `"code":` 出现（jsonparser 语义），极少数 code 排在嵌套对象之后的响应可能取到嵌套值 —— 依赖 err 而非 code 可规避。
 
 ### 3.3 内存所有权
@@ -151,7 +151,7 @@ typedef struct {
 
 > **⚠️ 这两行的差别咬过人。** 2026-09 把若干服务从 linuxapi 迁到 weapi 时，
 > `ne_lyric` / `ne_song_url_old` 把「接管」的记忆带了过来、没有补 `jmap_free`，
-> 于是每调一次泄漏一次（lyric 还是 nume 的**高频路径**）。修于 `dbbb3fa`。
+> 于是每调一次泄漏一次（lyric 还是 Cirro 的**高频路径**）。修于 `dbbb3fa`。
 > 迁移时**逐函数核对**，别靠「这一族应该都一样」的印象。
 > C 层判据在 `include/netease/request.h`：`ne_call_linuxapi` 的注释写了
 > `TAKES OWNERSHIP of data (do not free it afterwards)`，其余三个没有这句。
@@ -293,7 +293,7 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
 |---|---|---|---|
 | API 基址 | `NE_API_BASE` | `ne_set_api_base()` | `https://music.163.com` |
 | 伪造国内出口 IP | `NE_REAL_IP=<ip>` | `ne_http_set_real_ip()` | 关 |
-| 每请求随机国内 IP | `NE_RANDOM_CN_IP=1` | `ne_http_set_random_cn_ip()` | 关（nume 在 JNI_OnLoad 里开了） |
+| 每请求随机国内 IP | `NE_RANDOM_CN_IP=1` | `ne_http_set_random_cn_ip()` | 关（Cirro 在 JNI_OnLoad 里开了） |
 | 请求节流 + 抖动 | `NE_RATE_LIMIT_MS` / `NE_RATE_LIMIT_JITTER_MS` | `ne_http_set_rate_limit()` | 关 |
 | 关连接复用 | `NE_NO_KEEPALIVE=1` | `ne_http_set_no_keepalive()` | 开 keepalive |
 | PC UA 轮换 | `NE_UA_ROTATE=1` | —（仅环境变量） | 固定 UA_PC |
@@ -308,7 +308,7 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
 
 - 持久化格式：Netscape cookies.txt（`# Netscape HTTP Cookie File` 头）。
 - 登录态核心 cookie：`MUSIC_U`（长效登录令牌）、`__csrf`；服务端下发的 `NMTID` 参与风控（见 §8）。
-- 桌面：CLI 自动 load/save。嵌入式：`ne_set_cookie_file()` 指到应用私有目录，`ne_jar_import_cookies()` 从 WebView 导出的 cookie 串导入（Android 宿主 nume/Cirro 的网页登录即此方案）。
+- 桌面：CLI 自动 load/save。嵌入式：`ne_set_cookie_file()` 指到应用私有目录，`ne_jar_import_cookies()` 从 WebView 导出的 cookie 串导入（Android 宿主 Cirro 的网页登录即此方案）。
 - **落盘时机（2026-10-07 补齐）**：① 导入 cookie 时（`ne_jar_import_cookies`，无条件写）；
   ② 任何**响应带 Set-Cookie** 时（`jar_sync_set_cookies` 合并后按内容指纹判断，变了才写）。
   以前只有 ①，于是服务端在响应里轮转的 `MUSIC_U` 续期 / `__csrf` 重发只活在内存，冷启动
@@ -330,7 +330,7 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
    - `ne_style_song` / `ne_style_playlist`：上游 `crypto='weapi'`，与库一致；sort 在 `style_playlist.js` 上游写死 0，与本库一致。
    - `ne_playlist_list` / `ne_playlist_catalogue`：对应上游 `top_playlist.js` / `playlist_catlist.js`（均 weapi），与库一致。
    - `ne_comments` / `ne_comments_hot`：上游现行 module 已迁移到 **v2 eapi**（`/api/v2/resource/comments`，threadId 放 body、分页用 pageNo/pageSize/cursor）；本库仍是 **v1 weapi**（threadId 放路径、offset+beforeTime 分页）。v1 仍可正常返回，但对齐上游的长期方向是 v2。thread 前缀（`R_SO_4_`/`A_PL_0_` 等）两种版本一致，调用方无感。
-   - `ne_radio_get`：无独立上游 module（上游把它塞进 `personal_fm.js` 的 `/api/v1/radio/get` 空 data）；本库模式（mode/subMode 扩展 + cookie os=ios）为 nume 侧增强，端点同源可行。
+   - `ne_radio_get`：无独立上游 module（上游把它塞进 `personal_fm.js` 的 `/api/v1/radio/get` 空 data）；本库模式（mode/subMode 扩展 + cookie os=ios）为 Cirro 侧增强，端点同源可行。
 5. **点赞 / 收藏一族（2026-10-06 新增，登录态探针逐条实测）**：
    - `ne_song_like` 的**通道与上游不同，是有意选的**：上游 `song_like.js` 用默认
      `createOption(query)`，按 `request.js` 的 `APP_CONF.encrypt ? 'eapi' : 'api'`
@@ -339,7 +339,7 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
      本库与之一致。song_like 本库仍走 **weapi**（跟库内 CLI 的 `cmd_like` 先例同方言，
      探针带登录态实测双向都生效）。**未尽事项：这条没在真机上抓过 App 实际打的 URL**，
      上游只是第三方 Node 实现、CLI 只是先例，都不算最终裁判；日后若行为异常，
-     先 `adb logcat -s NumeHttp` 看 `--> POST` 确认走 /weapi 还是 /eapi，再决定是否
+     先 `adb logcat -s CirroHttp` 看 `--> POST` 确认走 /weapi 还是 /eapi，再决定是否
      照 `ne_playlist_update_name` 改用 eapi 通道。
    - `ne_song_like` 的 `like` **只接受字符串 "true" / "false"**（本层透传给服务端判定，
      不替它兜底）。上游是在客户端转布尔 `like = query.like !== 'false'`（语义还相反：
@@ -350,7 +350,7 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
      成功返 `{"playlistId": 7238603648, "code":200}` —— **那个 playlistId ≠ uid**（实测 uid 6393271458 对应歌单 7238603648），
      别拿 uid 当「我喜欢的音乐」的 id。
    - **失败藏在 message 里**：对下架歌曲点赞，服务端回 HTTP 200 + `{"code":401,"message":"下架歌曲无法收藏"}`。
-     调用方只看 `err` / 200 判不出任何东西 —— nume 侧统一由 `InteractionRepository` 把 message 抽出来给用户看。
+     调用方只看 `err` / 200 判不出任何东西 —— Cirro 侧统一由 `InteractionRepository` 把 message 抽出来给用户看。
    - **这三条写端点只在 `/weapi/` 上有实现**（2026-10-06 双前缀对照实测，只换前缀同一份数据）：
      `/weapi/song/like` 200 ／ `/api/song/like` **400 请求参数错误**；
      `/weapi/album/sub` 200 ／ `/api/album/sub` **400 参数错误**；
@@ -362,8 +362,8 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
      重复调幂等（对已取消的歌再调 unlike 仍返 200；对已收藏的专辑再 sub 返
      `{"code":200,"message":"该专辑已经在用户收藏列表中"}` —— **200 也带 message，但那是「已在目标态」，不是失败**）。
      客户端可以乐观更新 + 失败回滚，不必先读后写。推论：读 message 必须配 code 一起判，
-     别把 200 的 message 也当错误弹给用户（nume 侧 `InteractionRepository.interpret` 正是 `code==200 → Ok`）。
-   - `ne_album_sublist` 的 **limit 默认 "25"（同上游 `query.limit || 25`）**；nume 侧判收藏态时
+     别把 200 的 message 也当错误弹给用户（Cirro 侧 `InteractionRepository.interpret` 正是 `code==200 → Ok`）。
+   - `ne_album_sublist` 的 **limit 默认 "25"（同上游 `query.limit || 25`）**；Cirro 侧判收藏态时
      显式传 "100"（`LibraryStateStore.fetchSubscribedAlbumIds`）。它是给「本地查表」用的，
      不是收藏管理页；收藏专辑超过单页上限的账号会漏判，要拉全得调用方自己分页累积。
 

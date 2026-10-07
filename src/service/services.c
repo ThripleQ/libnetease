@@ -867,7 +867,7 @@ ne_resp *ne_simi_artist(const char *artist_id) {
  *    下架歌曲点赞返 `{"code":401,"message":"下架歌曲无法收藏"}`（探针实测
  *    曲目 186016）。所以调用方拿到的 ne_resp 既不是 err != 0 也不是
  *    非 200 code —— 必须把 body 里的 message 透到 UI，否则用户面前就是
- *    「点了没反应」。见 nume 侧 InteractionRepository 的 ActionResult。
+ *    「点了没反应」。见 Cirro 侧 InteractionRepository 的 ActionResult。
  *
  * ② **必须走 /weapi，不是可选项**。2026-10-06 双前缀对照（同一份数据，只换前缀，
  *    登录态探针）：
@@ -904,7 +904,7 @@ ne_resp *ne_simi_artist(const char *artist_id) {
  *      · 探针带登录态实测 /weapi/song/like **双向都生效**（like=true/false 各一次，
  *        改完立刻还原），功能上无缺口。
  *    ⚠ 未做的一步：**这条没有在真机上抓过 App 实际打的 URL**（`adb logcat -s
- *    NumeHttp` 看 `--> POST`）。上游是第三方 Node 实现、CLI 是先例，两者都不是
+ *    CirroHttp` 看 `--> POST`）。上游是第三方 Node 实现、CLI 是先例，两者都不是
  *    最终裁判；若将来某天发现 weapi 行为异常，第一件事是抓包确认官方走的是
  *    /weapi 还是 /eapi/song/like，再决定要不要照 ne_playlist_update_name 改成 eapi。
  *
@@ -977,7 +977,7 @@ ne_resp *ne_album_subscribe(const char *id, const char *t) {
 ne_resp *ne_album_sublist(const char *limit, const char *offset) {
     /* 默认值跟上游一致（album_sublist.js 的 `query.limit || 25`）。
      * 本库的实际用途（判「这张专辑收没收藏」）想要尽量拉全，但那是**调用方**该
-     * 决定的事 —— nume 侧显式传 "100"（见 LibraryStateStore.fetchSubscribedAlbumIds），
+     * 决定的事 —— Cirro 侧显式传 "100"（见 LibraryStateStore.fetchSubscribedAlbumIds），
      * 不由本层替它把默认值改大。服务端单页上限外的收藏会漏判，要真正拉全需分页累积。 */
     if (!limit || !*limit) limit = "25";
     if (!offset || !*offset) offset = "0";
