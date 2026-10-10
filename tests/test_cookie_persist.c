@@ -30,6 +30,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <process.h>
+#define NE_TEST_GETPID() ((int)_getpid())
+#else
+#include <unistd.h>
+#define NE_TEST_GETPID() ((int)getpid())
+#endif
 
 #define JAR_PATH "test_cookie_persist.tmp"
 
@@ -115,6 +124,21 @@ static void preset_jar_file(void) {
     fputs("music.163.com\tFALSE\t/\tFALSE\t253402300799\tMUSIC_U\tOLD\n", f);
     fputs("music.163.com\tFALSE\t/\tFALSE\t253402300799\t__csrf\tOLDCSRF\n", f);
     fclose(f);
+}
+
+/* 把「现在 ± delta 秒」写成 HTTP 日期（RFC 1123）。用动态日期而不是固定日期：
+ * 固定日期（1970 / 2027）之间差着好几年，即使日期换算整体偏了一两天也照样
+ * 通过 —— 只有拿「一天前 / 一天后」去夹，才能压出换算精度。 */
+static void http_date_from_now(long delta, char *out, size_t cap) {
+    static const char *wd[7] = { "Sun","Mon","Tue","Wed","Thu","Fri","Sat" };
+    static const char *mo[12] = { "Jan","Feb","Mar","Apr","May","Jun",
+                                  "Jul","Aug","Sep","Oct","Nov","Dec" };
+    time_t t = time(NULL) + (time_t)delta;
+    struct tm *g = gmtime(&t);
+    if (!g) { out[0] = '\0'; return; }
+    snprintf(out, cap, "%s, %02d %s %04d %02d:%02d:%02d GMT",
+             wd[g->tm_wday], g->tm_mday, mo[g->tm_mon], g->tm_year + 1900,
+             g->tm_hour, g->tm_min, g->tm_sec);
 }
 
 /* 服务端轮转时真实会发的形状：值 + 若干属性（属性绝不能进 jar） */
@@ -218,6 +242,71 @@ int main(void) {
     expect(t != NULL, "9 写失败后不记指纹：路径恢复后同样的内容会补写一次");
     expect_contains(t, "\tMUSIC_U\tRETRY1\n", 1, "9 补写的内容正确");
     free(t);
+
+    /* ── 10. Set-Cookie 的删除语义：Max-Age=0 ─────────────── */
+    ne_set_cookie_file(JAR_PATH);
+    remove(JAR_PATH);
+    ne_jar_import_cookies("MUSIC_U=U10; __csrf=C10; JSESSIONID-WYYY=J10");
+    r = fire("MUSIC_U=; Max-Age=0; Path=/");      /* 服务端注销登录令牌 */
+    ne_resp_free(r);
+    expect(ne_jar_get(ne_global_jar(), "MUSIC_U") == NULL,
+           "10 Max-Age=0 把 cookie 从 jar 移除（不是存成空值）");
+    expect(ne_jar_get(ne_global_jar(), "__csrf") != NULL,
+           "10 同一次 Set-Cookie 未提到的 cookie 不受影响");
+    t = slurp(JAR_PATH);
+    expect_contains(t, "\tMUSIC_U\t", 0, "10 注销的 cookie 不再落到磁盘");
+    expect_contains(t, "\t__csrf\tC10\n", 1, "10 这次落盘里其余 cookie 正常");
+    free(t);
+
+    /* ── 11. Expires：过去 → 删，未来 → 留 ─────────────────── */
+    ne_jar_import_cookies("EXPA=old; EXPB=old");
+    r = fire("EXPA=future; Expires=Wed, 09 Jun 2027 10:18:14 GMT\n"
+             "EXPB=gone; Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+    ne_resp_free(r);
+    {
+        const char *a = ne_jar_get(ne_global_jar(), "EXPA");
+        expect(a && strcmp(a, "future") == 0, "11 未来的 Expires 正常写入新值");
+        expect(ne_jar_get(ne_global_jar(), "EXPB") == NULL,
+               "11 已过去的 Expires 移除 cookie（RFC 6265 的注销手势）");
+    }
+
+    /* ── 12. 日期换算精度：一天前 / 一天后必须判对方向 ───────── */
+    {
+        char tomorrow[64], yesterday[64], line[256];
+        http_date_from_now(86400, tomorrow, sizeof tomorrow);
+        http_date_from_now(-86400, yesterday, sizeof yesterday);
+        ne_jar_import_cookies("TOMORROW=old; YESTERDAY=old");
+        snprintf(line, sizeof line,
+                 "TOMORROW=fresh; Expires=%s\nYESTERDAY=stale; Expires=%s",
+                 tomorrow, yesterday);
+        r = fire(line);
+        ne_resp_free(r);
+        {
+            const char *tm = ne_jar_get(ne_global_jar(), "TOMORROW");
+            expect(tm && strcmp(tm, "fresh") == 0,
+                   "12a 一天后的 Expires 判为未过期（日期换算精度到天）");
+            expect(ne_jar_get(ne_global_jar(), "YESTERDAY") == NULL,
+                   "12b 一天前的 Expires 判为已过期");
+        }
+    }
+
+    /* ── 13. 读不懂的过期属性 → 一律不删（保守方向必须是「留」）── */
+    ne_jar_import_cookies("KEEP=1");
+    r = fire("KEEP=2; Max-Age=\n"
+             "KEEP=3; Expires=not a date at all");
+    ne_resp_free(r);
+    {
+        const char *k = ne_jar_get(ne_global_jar(), "KEEP");
+        expect(k != NULL, "13 非法 Max-Age / Expires 不触发删除（误删=用户被登出）");
+        expect(k && strcmp(k, "3") == 0, "13 值本身照常更新");
+    }
+
+    /* ── 14. 原子落盘：临时文件必须已被 rename 走，不留残渣 ──── */
+    {
+        char tmp_path[512];
+        snprintf(tmp_path, sizeof tmp_path, "%s.tmp%d", JAR_PATH, (int)NE_TEST_GETPID());
+        expect(!file_exists(tmp_path), "14 落盘后不残留临时文件（写盘是 tmp+rename）");
+    }
 
     remove(JAR_PATH);
     printf(failures ? "cookie_persist: %d FAILURES\n" : "cookie_persist: all ok\n",

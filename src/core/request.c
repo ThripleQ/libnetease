@@ -5,6 +5,7 @@
 #include "netease/deviceids.h"
 #include "netease/encoding.h"
 #include "netease/http.h"
+#include "netease/inflate.h"
 #include "netease/jval.h"
 #include "netease/rand.h"
 #include "netease/risk.h"
@@ -194,7 +195,12 @@ static void jar_sync_set_cookies(const char *set_cookies) {
     char *save = NULL;
     for (char *line = strtok_r(copy, "\n", &save); line;
          line = strtok_r(NULL, "\n", &save))
-        ne_jar_merge_cookie_str(g_jar, line);
+        /* 走 Set-Cookie 专用合并（认 Max-Age / Expires 的删除语义）而不是
+         * 通用的 cookie 串合并：服务端注销一个 cookie 的标准做法是下发
+         * `name=; Expires=Thu, 01 Jan 1970 ...`，不认这条属性的话，被注销的
+         * cookie 会以「空值」形态永远留在 jar 与磁盘里，而且照样出现在之后
+         * 每个请求的 Cookie 头上。 */
+        ne_jar_merge_set_cookie(g_jar, line);
     jar_persist_locked(0);
     jar_unlock();
     free(copy);
@@ -223,6 +229,46 @@ static double parse_code(const char *body) {
     return 200;
 }
 
+/* 响应体压缩探测解压（见 include/netease/inflate.h）。
+ *
+ * 为什么在内核里做、而不是交给传输层：传输层是**可注入**的，而各家 HTTP 栈的
+ * 自动解压覆盖不齐 —— OkHttp 只解 `Content-Encoding: gzip`（Android 宿主走的
+ * 就是这条），curl 只解它自己在 Accept-Encoding 里宣告过的编码，而服务端若
+ * **不带** Content-Encoding 直接发 zlib 体，则谁都不解。上游 Go 版正是在响应
+ * 处手动补了这一手（request.go「数据被压缩 进行解码」）。放在 finish() 里，
+ * 两条传输路径拿到同一份保护，且注入传输层的新宿主也不必自己实现。
+ *
+ * 判据三重，缺一不可 —— **宁可不解压，也不能把普通数据当压缩体啃掉**：
+ *   ① 有公认的包装头（gzip 1f 8b / zlib 78 ..）；raw deflate 无头可辨，不猜；
+ *   ② 结构合法、解得出来（解压器内部校验，失败即 NULL）；
+ *   ③ 解出来的东西**像 JSON**（首个非空白字符是 '{' 或 '['）。
+ * 第 ③ 条是兜底：网易云的响应要么是 JSON，要么是空体/网关错误页，任何误判
+ * （图片、HTML）都不会同时满足三条。返回 NULL 时调用方原样使用原始 body。 */
+static char *decompress_json_body(const char *body, size_t len, size_t *out_len) {
+    if (!body || len < 2) return NULL;
+    const uint8_t *in = (const uint8_t *)body;
+    if (!ne_inflate_has_gzip_header(in, len) && !ne_inflate_has_zlib_header(in, len))
+        return NULL;
+
+    size_t n = 0;
+    uint8_t *raw = ne_inflate(in, len, &n, 0);
+    if (!raw) return NULL;
+
+    size_t i = 0;
+    while (i < n && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\r' || raw[i] == '\n')) i++;
+    if (i >= n || (raw[i] != '{' && raw[i] != '[')) {
+        free(raw);
+        return NULL;
+    }
+
+    char *s = ne_xmalloc(n + 1);
+    memcpy(s, raw, n);
+    s[n] = '\0';
+    free(raw);
+    *out_len = n;
+    return s;
+}
+
 static ne_resp *finish(ne_http_resp *h) {
     ne_resp *r = ne_xmalloc(sizeof(ne_resp));
     memset(r, 0, sizeof *r);
@@ -233,8 +279,23 @@ static ne_resp *finish(ne_http_resp *h) {
         r->err = 1;
     } else {
         jar_sync_set_cookies(h ? h->set_cookies : NULL);
-        r->body = ne_xstrdup(h->body ? h->body : "");
-        r->body_len = h->body_len;
+        /* 按**长度**复制，不能用 ne_xstrdup —— 那个走 strlen，而压缩响应体
+         * 里必然出现 0x00 字节（见下面 decompress_json_body）。用 strlen 会
+         * 把 body 截到第一个 NUL，而 body_len 仍是原始长度，随后按 body_len
+         * 去读就会越界读，且解压永远失败。 */
+        size_t blen = h->body ? h->body_len : 0;
+        r->body = ne_xmalloc(blen + 1);
+        if (blen) memcpy(r->body, h->body, blen);
+        r->body[blen] = '\0';
+        r->body_len = blen;
+        /* 压缩体先还原再交给 parse_code / 调用方 —— 否则真实响应会被解成
+         * 乱码、code 落到 200 兜底，表现为「接口通了但内容全错」这种最难查的
+         * 症状（业务错误码 401 也会被读成 200）。 */
+        char *plain = decompress_json_body(r->body, r->body_len, &r->body_len);
+        if (plain) {
+            free(r->body);
+            r->body = plain;
+        }
         r->code = parse_code(r->body);
         r->err = 0;
     }

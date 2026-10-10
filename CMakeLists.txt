@@ -38,6 +38,10 @@ add_library(netease STATIC
   src/vendor/aes.c
   src/vendor/bignum.c
   src/vendor/rsa.c
+  # vendor: DEFLATE decoder (RFC 1951) + zlib/gzip wrappers. 自带而非链接 libz：
+  # 传输层可注入（Android 用 OkHttp），宿主的自动解压覆盖不齐，这一层必须是
+  # 桌面与 Android 逐字节同行为的纯 C（见 include/netease/inflate.h）。
+  src/vendor/inflate.c
   # vendor: go-qrcode port (Medium level)
   src/vendor/qrenc.c
   # data: large read-only tables, compiled independently from code so the
@@ -108,6 +112,16 @@ add_test(NAME rewrite COMMAND test_request)
 add_executable(test_cookie_persist tests/test_cookie_persist.c)
 target_link_libraries(test_cookie_persist PRIVATE netease)
 add_test(NAME cookie_persist COMMAND test_cookie_persist)
+
+# DEFLATE 解压：8 条矢量 × 3 种包装（gzip/zlib/raw）+ 上限保护 + 损坏输入
+add_executable(test_inflate tests/test_inflate.c)
+target_link_libraries(test_inflate PRIVATE netease)
+add_test(NAME inflate COMMAND test_inflate)
+
+# 响应体：压缩探测解压（zlib/gzip）+ 按长度复制（压缩体含 0x00）
+add_executable(test_response_body tests/test_response_body.c)
+target_link_libraries(test_response_body PRIVATE netease)
+add_test(NAME response_body COMMAND test_response_body)
 
 add_executable(test_qr tests/test_qr.c)
 target_link_libraries(test_qr PRIVATE netease)

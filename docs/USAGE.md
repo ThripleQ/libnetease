@@ -318,7 +318,40 @@ CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化�
 - `filterJar` 语义（cookiejar.c）：反欺诈策略写入的**假 NMTID**（`some_random_id_from_strategy`）与 cookie 属性段（`Path=` / `Domain=` / `Expires=` / `HttpOnly=` / `Priority=` 等）不会进入 jar / 不会落盘。属性名清单是**线上格式**的一部分 —— 漏一个名字，它就会变成一个假 cookie 被塞进每个请求的 Cookie 头。
 - **文件格式**：LF 行尾、二进制读写（`fopen(...,"wb")`）。文本模式在 Windows 上会落 CRLF，破坏与 Go 版 FileJar 的字节兼容（跨平台读回时值里会带行尾残留）。
 - **这条路径怎么测**：`tests/test_cookie_persist.c` 注入假传输层（`ne_http_set_transport`），不联网即可确定性触发 —— 真机上服务端根本不轮转（2026-10-07 实测：冷启动 26 个请求 + 4 次写操作，26/26 响应 status=200、**Set-Cookie 一条都没有**），只看真机无法区分「代码对但没被触发」和「代码错且永不触发」。测试覆盖：轮转落盘 / 属性不进 jar / 内容没变不写盘 / 无 Set-Cookie 不写盘 / reload 重置指纹 / 导入强制写 / 未配路径不写 / 落盘→reload 往返逐字一致 / 写失败不记指纹。
-- **已知残留（未修，影响面小）**：① `ne_jar_save_file` 是「截断后写」，不是原子写（先写临时文件再 rename）—— 写盘途中进程被杀会留下半个文件、登录态丢失；现在写盘频率仍极低（只在服务端轮转时），风险窗口是几百微秒。② 服务端若用 `Max-Age=0` 下发删除，本库只把它当成「值为空」，忽略过期语义（jar 一律按 `FAR_FUTURE` 存）。③ 传输层负责跟随重定向，请求内核只看**最终响应**的 Set-Cookie；实测流量无 3xx，故当前无影响。
+- **已知残留**：
+  ① ~~`ne_jar_save_file` 是「截断后写」，不是原子写~~ **2026-10-10 已修**：改为写同目录临时文件
+  （`<path>.tmp<pid>`）再 `rename` 顶替，Windows 上先 `remove`（其 rename 不覆盖已存在目标）。
+  写盘途中进程被杀不再留半个文件 —— 登录态就丢在那半个文件里，这是原先最实在的一处风险。
+  ② ~~服务端用 `Max-Age=0` 下发删除时只当「值为空」~~ **2026-10-10 已修**：新增
+  `ne_jar_merge_set_cookie()`，认 `Max-Age`（优先）与 `Expires`，命中即 `ne_jar_remove()` 从 jar 与
+  磁盘一并删除。**只有 Set-Cookie 行走这条路径** —— Cookie 请求头与 `document.cookie` 形态永远
+  不带属性，让它们也具备删除能力只会凭空多出一个危险入口。
+  ③ 传输层负责跟随重定向，请求内核只看**最终响应**的 Set-Cookie；实测流量无 3xx，故当前无影响（不变）。
+
+### 7.1 响应体解码（2026-10-10 新增）
+
+**压缩探测解压**（`src/vendor/inflate.c` + `include/netease/inflate.h`）：`finish()` 在把 body
+交给 `parse_code` / 调用方之前，先按三重判据试解压 ——
+① 有公认包装头（gzip `1f 8b` / zlib `78 ..`，raw deflate 无头可辨，**不猜**）；
+② 结构合法解得出来；③ **解出来必须像 JSON**（首个非空白字符是 `{` 或 `[`）。
+任一不满足就原样使用原始 body —— **失败是安全的**，本模块的 bug 只会退化成「不解压」。
+
+为什么在内核里做而不是交给传输层：传输层是**可注入**的，各家的自动解压覆盖不齐 ——
+OkHttp（Android 宿主）只解 `Content-Encoding: gzip`，碰到 `deflate` 会把压缩体原样交回来；
+curl 只解它自己在 Accept-Encoding 里宣告过的编码；服务端若**不带** Content-Encoding 直接发
+zlib 体，则谁都不解。上游 Go 版正是在响应处手动补了这一手（request.go「数据被压缩 进行解码」）。
+
+不解压的后果不是「报错」而是「静默错值」：body 是乱码 → 顶层 `code` 扫不到 → 走兜底，
+于是**服务端的 401 会被读成 200**，用户看到「收藏成功」而实际失败。它同样会污染
+`code` 之外的每一个字段。Android 侧尤其要注意（那是唯一不走 curl 的路径）。
+
+**按长度复制（同一轮修的既有漏洞）**：`finish()` 原先用 `ne_xstrdup(h->body)` 取 body，
+那是 `strlen` 语义 —— 而压缩体里**必然出现 `0x00` 字节**，body 会被截到第一个 NUL，
+`body_len` 却仍是原始长度（随后按它读就越界）。现已改为按 `h->body_len` `memcpy` + 补 NUL。
+不改这一处，上面那段解压代码在真实场景下**永远不会生效**。
+
+刻意**不校验**尾部校验和（zlib 的 adler32 / gzip 的 CRC32+ISIZE）：调用目的是把响应读成 JSON，
+而 JSON 解析本身就是完备的完整性判据，多算一遍 CRC 只是给每个响应白加一次 O(n)。
 
 ## 8. 已知限制与风险（2026-10-05 审计，对照权威上游在线核对）
 
