@@ -109,7 +109,12 @@ ne_resp *ne_song_url_v1(const char *id, const char *level) {
     char url[640];
     snprintf(url, sizeof url, "%s/weapi/song/enhance/player/url/v1",
              ne_api_base());
-    ne_resp *r = ne_call_weapi(url, data);
+    /* 必须注入 os + appver（走 ne_call_weapi_cookies，不是 ne_call_weapi）：
+     * 这条端点按权益发 URL，未购 VIP 歌缺这两个字段一律回 -110 / url=null
+     * ——免费歌不受影响，所以症状是「只有 VIP 歌播不了、连试听都没有」。
+     * 传 COOKIES_OS_IOS 而**不是** COOKIES_OS_PC（后者 appver 会变空串，同样 -110）。
+     * 完整推导与实测见 request.c 里 ne_call_weapi_cookies() 的注释。 */
+    ne_resp *r = ne_call_weapi_cookies(url, data, COOKIES_OS_IOS);
     jmap_free(data);
     return r;
 }

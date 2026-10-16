@@ -335,33 +335,30 @@ static ne_resp *finish_post_retry(const char *url, const char *form,
     }
 }
 
-ne_resp *ne_call_weapi(const char *api, const jmap *data) {
-    ne_weapi_result enc;
-    if (ne_weapi(data, &enc) != 0) {
-        ne_resp *r = ne_xmalloc(sizeof(ne_resp));
-        r->code = 520; r->body = ne_xstrdup("encode failed");
-        r->body_len = strlen(r->body); r->err = 1;
-        return r;
-    }
-    const char *kv[4] = { "params", enc.params, "encSecKey", enc.enc_sec_key };
-    char *form = ne_http_form_encode(kv, 2);
-    char *cookies = jar_cookie_header_alloc();
+/* CallWeapi 系两条入口共用的「编码失败」回执（request.go 侧是 (520, ...)）。 */
+static ne_resp *callweapi_encode_failed(void) {
+    ne_resp *r = ne_xmalloc(sizeof(ne_resp));
+    r->code = 520; r->body = ne_xstrdup("encode failed");
+    r->body_len = strlen(r->body); r->err = 1;
+    return r;
+}
 
-    ne_resp *r = finish_post_retry(api, form, cookies, choose_ua());
-    free(form); free(cookies);
-    ne_weapi_free(&enc);
-
-    /* CallWeapi (request.go:375): unlike CreateRequest it VALIDATES the
-     * body — must unmarshal into map[string]interface{} with a numeric
-     * top-level "code", else (0, body, err). Transport error is also
-     * (0, err). The song-url shell keys its fallback off this err. */
+/* CallWeapi (request.go:375): unlike CreateRequest it VALIDATES the body —
+ * must unmarshal into map[string]interface{} with a numeric top-level
+ * "code", else (0, body, err). Transport error is also (0, err). The song-url
+ * shell keys its fallback off this err.
+ *
+ * 2026-10 性能修正：原实现把 body 再全树解析一遍（finish 里 parse_code 已经
+ * 解析过同一 body——每大响应两次建树纯浪费）。改用流式扫描做 CallWeapi 的
+ * 校验：语义不变（数字 code → code；否则 code=0, err=2）。
+ *
+ * 2026-10-16 起由 ne_call_weapi / ne_call_weapi_cookies 共用：**两条入口的 err
+ * 口径必须逐字一致**（音质回退链读的就是它），所以校验只留这一份。 */
+static void callweapi_validate_body(ne_resp *r) {
     if (r->err == 1) {
         r->code = 0;
-        return r;
+        return;
     }
-    /* 2026-10 性能修正：原实现把 body 再全树解析一遍（finish 里 parse_code
-     * 已经解析过同一 body——每大响应两次建树纯浪费）。改用流式扫描做
-     * CallWeapi 的校验：语义不变（数字 code → code；否则 code=0, err=2）。 */
     double code;
     if (ne_jval_scan_top_code(r->body, &code)) {
         r->code = code;
@@ -369,6 +366,19 @@ ne_resp *ne_call_weapi(const char *api, const jmap *data) {
         r->code = 0;
         r->err = 2;
     }
+}
+
+ne_resp *ne_call_weapi(const char *api, const jmap *data) {
+    ne_weapi_result enc;
+    if (ne_weapi(data, &enc) != 0) return callweapi_encode_failed();
+    const char *kv[4] = { "params", enc.params, "encSecKey", enc.enc_sec_key };
+    char *form = ne_http_form_encode(kv, 2);
+    char *cookies = jar_cookie_header_alloc();
+
+    ne_resp *r = finish_post_retry(api, form, cookies, choose_ua());
+    free(form); free(cookies);
+    ne_weapi_free(&enc);
+    callweapi_validate_body(r);
     return r;
 }
 
@@ -478,6 +488,52 @@ static ne_resp *post_common(const char *orig_url, const char *post_url,
     ne_resp *r = finish_post_retry(post_url, form, cookies, ua);
     free(cookies);
     ne_jar_free(scratch);
+    return r;
+}
+
+/* ne_call_weapi 的**注入版**：CallWeapi 语义逐字不动（url 原样发出、不做
+ * /api/ → /weapi/ 重写；body 严格校验，err 口径由 callweapi_validate_body 保证
+ * 与 ne_call_weapi 完全一致），只把 cookie 头的组装从「活 jar 原样」换成
+ * post_common 的注入版（`__remember_me` + `os` + `appver`，MUSIC_U 在场时补一个
+ * 随机 `_ntes_nuid`）。
+ *
+ * ## 为什么需要它（2026-10-16）
+ * `/weapi/song/enhance/player/url/v1` 是**按权益发 URL** 的端点：对「未购 VIP 歌」
+ * 它要求请求同时带**非空的 `os` 与 `appver`**，缺任一个一律回
+ * `{code:200, data:[{code:-110, url:null, freeTrialInfo:null}]}`（免费与低音质免费歌
+ * 不看这两个字段 ⇒ 症状恰好是「只有 VIP 歌播不了」，连 30 秒试听片段都没有）。
+ *
+ * 而 ne_call_weapi 只发活 jar，**安卓侧活 jar 里永远没有这两个字段**：
+ * post_common 写的是 `jar_snapshot()` 出来的 scratch 副本（请求完即 free，不落回活
+ * jar），唯一写活 jar 的 ne_apply_request_strategy() 只在 qr.c:63（扫码登录）与
+ * ne_login_refresh()（services.c:575）里被调，**JNI 两个都没接**；App 的登录又只有
+ * 「WebView 导入 cookie」一条路。于是这个端点成了全仓库唯一依赖「jar 恰好带
+ * os/appver」的调用 —— 与它同族的所有读端点（ne_recommend_songs / ne_radio_get /
+ * ne_homepage_block_page / ne_playlist_detail …）都走 post_common，从来不受影响。
+ *
+ * ⚠️ **extra_cookies 要传 `COOKIES_OS_IOS`，不要传 `COOKIES_OS_PC`**：post_common 的
+ * 推导是 `appver = (os != "pc") ? "9.0.65" : ""`，用 pc 会发出 `appver=`（**空串**），
+ * 实测与「压根不发 os/appver」同罪 —— 同端点同 br 只差这一对：
+ * `check_music br=320000`（注入 os=ios+appver）拿到 url + freeTrialInfo，而
+ * `song_url_old br=320000`（`COOKIES_OS_PC`）是 -110。mobile os + PC UA 与站内其它
+ * 读请求本来就一致，不是新增的风险面。
+ *
+ * 注 1：url **不重写** —— 与 ne_call_weapi 一样，调用方要给已经带 /weapi/ 前缀的绝对 url。
+ * 注 2：post_common **不塞** body 里的 `csrf_token`（那是 weapi_request 的活）。实测这条
+ *       端点不要求它：2026-10-16 用带 os/appver 的 jar 直接调，没有 csrf_token 也拿到了
+ *       url + freeTrialInfo。所以这里不为此改口径。 */
+ne_resp *ne_call_weapi_cookies(const char *api, const jmap *data,
+                               const char *const *extra_cookies) {
+    ne_weapi_result enc;
+    if (ne_weapi(data, &enc) != 0) return callweapi_encode_failed();
+    const char *kv[4] = { "params", enc.params, "encSecKey", enc.enc_sec_key };
+    char *form = ne_http_form_encode(kv, 2);
+    /* orig_url 只被 post_common 用来判「要不要补 NMTID」（含 "login" 的 url），
+     * 这里两者同一个 url 即正确。 */
+    ne_resp *r = post_common(api, api, form, choose_ua(), extra_cookies, 0);
+    free(form);
+    ne_weapi_free(&enc);
+    callweapi_validate_body(r);
     return r;
 }
 

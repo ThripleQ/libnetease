@@ -53,6 +53,19 @@ void ne_set_api_base(const char *base);
  * UA = pc, Referer set, cookies from global jar. */
 ne_resp *ne_call_weapi(const char *api, const jmap *data);
 
+/* 同 ne_call_weapi 的语义（url 原样、body 严格校验、err 口径一致），但 cookie 头走
+ * post_common 的注入版（`__remember_me` + `os` + `appver`，有 MUSIC_U 时补随机
+ * `_ntes_nuid`）而不是「活 jar 原样」。
+ *
+ * 用途：**按权益发 URL** 的端点（`/weapi/song/enhance/player/url/v1`）对未购 VIP 歌
+ * 要求请求同时带非空的 `os` 与 `appver`，缺任一个回 `code=-110 / url=null`；而安卓侧
+ * 没有代码会把这两个字段写进活 jar（见 request.c 里本函数的文档）。
+ *
+ * ⚠️ 用 `COOKIES_OS_IOS`（→ os=ios + appver=9.0.65），**不要用 `COOKIES_OS_PC`**
+ * —— 后者会让 appver 变成空串，实测同样拿不到 url。 */
+ne_resp *ne_call_weapi_cookies(const char *api, const jmap *data,
+                               const char *const *extra_cookies);
+
 /* util.CreateRequest("POST", url, data, {Crypto:"weapi", Cookies: extra})
  * — the legacy path used by most read services and the `like` command.
  * Applies the /\w*api/ → /weapi/ URL rewrite, injects the request.go cookie
