@@ -267,6 +267,13 @@ ne_resp *ne_homepage_block_page(const char *refresh, const char *cursor);
  * 热门歌」冒充相似艺人，播出来永远是种子歌手自己的歌。 */
 ne_resp *ne_simi_artist(const char *artist_id);
 
+/* SimiSongService — /weapi/discovery/simiSong {songid}：**相似歌曲**。
+ * 传入一首歌的 id，返回一批相似的歌（`songs[]`，**老格式**：顶层
+ * `album`/`artists`/`duration`，与 radio/get 同款）。kanade 主页「相似歌曲 /
+ * 从你喜欢的歌听起」卡（登录态实测第 4 张功能卡）走这条：种子歌（猜你喜欢
+ * 第一首）→ 相似歌曲。参数名 `songid` 全小写，与 `artistid` 同款。 */
+ne_resp *ne_simi_song(const char *song_id);
+
 /* ── like / subscribe family（added 2026-10-06）──────────────────────
  * 第三方客户端那批「占位按钮」（歌单页分享/评论/收藏/排序、播放页红心、
  * 评论点赞）里，凡是要写服务端的那几个所需端点。四条全部走 ne_create_weapi

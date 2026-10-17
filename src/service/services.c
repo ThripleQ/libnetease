@@ -864,6 +864,23 @@ ne_resp *ne_simi_artist(const char *artist_id) {
     return r;
 }
 
+/* simi_song — weapi/discovery/simiSong {songid}（相似歌曲）。
+ * 参数名是 `songid`（全小写，没有下划线），与 simi_artist 的 `artistid` 同款，
+ * 2026-10-17 登录态探针实测（songid=514765154 → 5 首，HTTP 200 code 200）。
+ * 返回的是**老格式**歌对象（顶层 `album`/`artists`/`duration`，没有 `al`/`ar`/`dt`）
+ * —— 与 radio/get 同款，Kotlin 侧 parseTrack 两套都认，无需处理。
+ * kanade 主页「相似歌曲 / 从你喜欢的歌听起」卡（登录态实测第 4 张功能卡）走这条：
+ * 种子歌（猜你喜欢第一首）→ 相似歌曲。 */
+ne_resp *ne_simi_song(const char *song_id) {
+    jmap *data = jmap_new();
+    jmap_put(data, "songid", song_id);
+    char url[640];
+    snprintf(url, sizeof url, "%s/weapi/discovery/simiSong", ne_api_base());
+    ne_resp *r = ne_create_weapi(url, data, NULL);
+    jmap_free(data);
+    return r;
+}
+
 /* ══ 收藏 / 点赞 family（2026-10-06，占位按钮接线） ═════════════════
  *
  * 这一族都是**写**接口，共用两条通用纪律：
