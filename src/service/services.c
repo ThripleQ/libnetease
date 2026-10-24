@@ -305,7 +305,14 @@ ne_resp *ne_user_playlist(const char *uid, const char *limit,
 }
 
 /* ── lyric_service.go — 2026-09: linuxapi → weapi（上游 api-enhanced 同路径），
- * 补 rv（罗马音）与 _nmclfl（防空标记）字段 ─────────────── */
+ * 补 rv（罗马音）与 _nmclfl（防空标记）字段 ───────────────
+ *
+ * 2026-10 逐字歌词：加 yv/ytv/yrv=-1，返回里多出
+ *   `yrc`（逐字主歌词，`[行起,行时长](字起,字时长,0)字…` 文本格式）、
+ *   `ytlrc`（逐字翻译，仍是普通 LRC 行级格式）、
+ *   `yromalrc`（逐字罗马音，LRC 行级）。
+ * **不要换成 `/weapi/song/lyric/v1`**：v1 的 lrc/yrc 转成 JSON 行（`{"t":…,"c":[…]}`），
+ * 且实测同样参数下部分歌反而不回 yrc。老路径 + yv 参数是官方客户端同款文本格式。 */
 ne_resp *ne_lyric(const char *id) {
     jmap *data = jmap_new();
     jmap_put(data, "id", id);
@@ -313,6 +320,9 @@ ne_resp *ne_lyric(const char *id) {
     jmap_put(data, "kv", "-1");
     jmap_put(data, "tv", "-1");
     jmap_put(data, "rv", "-1");
+    jmap_put(data, "yv", "-1");
+    jmap_put(data, "ytv", "-1");
+    jmap_put(data, "yrv", "-1");
     jmap_put(data, "_nmclfl", "1");
     char url[640];
     snprintf(url, sizeof url, "%s/api/song/lyric", ne_api_base());

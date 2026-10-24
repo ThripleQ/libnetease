@@ -72,7 +72,11 @@ ne_resp *ne_playlist_detail(const char *id, const char *s, const char *n);
 ne_resp *ne_user_playlist(const char *uid, const char *limit,
                           const char *offset);
 
-/* LyricService — weapi /song/lyric, cookie os=pc, lv/kv/tv/rv=-1, _nmclfl=1. 2026-09: was linuxapi */
+/* LyricService — weapi /song/lyric, cookie os=pc, lv/kv/tv/rv/yv/ytv/yrv=-1,
+ * _nmclfl=1. 2026-09: was linuxapi；2026-10: 加 yv 系列取逐字。
+ * 返回键：lrc / tlyric / romalrc（行级），yrc / ytlrc / yromalrc（逐字，无逐字歌不出现）。
+ * yrc 是 `[行起ms,行时长ms](字起ms,字时长ms,0)字…` 文本格式；ytlrc 是普通 LRC。
+ * 别走 /song/lyric/v1：那边 yrc 被包成 JSON 行，且部分歌不回 yrc。 */
 ne_resp *ne_lyric(const char *id);
 
 /* ToplistDetailService — weapi/toplist/detail */
