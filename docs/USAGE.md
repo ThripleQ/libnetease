@@ -185,7 +185,7 @@ typedef struct {
 | `ne_song_purchased(limit,offset)` | `/weapi/single/mybought/song/list` | W | 已购单曲 | ✓ |
 | `ne_album_purchased(limit,offset)` | `/weapi/digitalAlbum/purchased` | W | 已购数字专辑 | ✓ |
 | `ne_song_detail(ids_csv)` | `/weapi/v3/song/detail` | W | ids "1,2,3" → c=[{"id":…}] | ✗ |
-| `ne_lyric(id)` | `/weapi/song/lyric` | W | lv/kv/tv/rv=-1，_nmclfl=1；2026-09 起（原 linuxapi） | ✗ |
+| `ne_lyric(id)` | `/weapi/song/lyric` | W | lv/kv/tv/rv/yv/ytv/yrv=-1，_nmclfl=1；2026-09 起（原 linuxapi） | ✗ |
 
 ### 4.2 歌单 / 榜单 / 发现
 
@@ -282,6 +282,8 @@ typedef struct {
 写：`like <id> <like\|unlike>` `subscribe <id> <t>` `track-add <pid> <sid>` `track-del <pid> <sid>` `playlist-create <name>` `playlist-rename <pid> <name>` `playlist-delete <pid>`
 
 CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化（假 NMTID 被 filterJar 过滤不落盘）。stdout 输出协议与 Go 版逐字节对齐。
+
+`lyric <id>` 输出 `{"code":…,"lrc":"<原文>","tlyric":"<翻译>","lyric":"<原文优先>","klyric":"<逐行卡拉OK，若有>"}`：原文与翻译分字段（旧版只出一个、且翻译优先，导致有翻译的歌丢掉原文）；`lyric` 保留为单文本回退键（原文为空时取翻译），仅读该键的宿主不受影响。
 
 > 注意：**短信验证码登录（send_captcha / login_cellphone_captcha）只有 C API，CLI 未暴露命令**。
 

@@ -255,19 +255,20 @@ int cmd_lyric(const char *id) {
         return 0;
     }
 
-    /* prefer tlyric (translated), fallback to lrc; klyric when present */
-    const char *lyric_text = "", *klyric_text = "";
+    /* Original and translation are separate fields. The old contract
+     * exposed one text only (tlyric preferred), so every translated song
+     * lost its original lyrics. `lyric` stays as the single-text fallback
+     * (original first) for hosts that only read that key. */
+    const char *lrc_text = "", *tlyric_text = "", *klyric_text = "";
+    ne_jval *lr = ne_jval_get(root, "lrc");
+    if (lr && ne_jval_type(lr) == NE_JV_OBJ) {
+        ne_jval *l = ne_jval_get(lr, "lyric");
+        if (l && ne_jval_type(l) == NE_JV_STR) lrc_text = ne_jval_str(l);
+    }
     ne_jval *t = ne_jval_get(root, "tlyric");
     if (t && ne_jval_type(t) == NE_JV_OBJ) {
         ne_jval *l = ne_jval_get(t, "lyric");
-        if (l && ne_jval_type(l) == NE_JV_STR) lyric_text = ne_jval_str(l);
-    }
-    if (!*lyric_text) {
-        ne_jval *lrc = ne_jval_get(root, "lrc");
-        if (lrc && ne_jval_type(lrc) == NE_JV_OBJ) {
-            ne_jval *l = ne_jval_get(lrc, "lyric");
-            if (l && ne_jval_type(l) == NE_JV_STR) lyric_text = ne_jval_str(l);
-        }
+        if (l && ne_jval_type(l) == NE_JV_STR) tlyric_text = ne_jval_str(l);
     }
     ne_jval *kl = ne_jval_get(root, "klyric");
     if (kl && ne_jval_type(kl) == NE_JV_OBJ) {
@@ -279,10 +280,15 @@ int cmd_lyric(const char *id) {
     ne_jval *code = ne_jval_get(root, "code");
     if (code && ne_jval_type(code) == NE_JV_NUM)
         ne_jval_put(out, "code", ne_jval_new_num(ne_jval_num_lexeme(code)));
-    if (*lyric_text)
-        ne_jval_put(out, "lyric", ne_jval_new_str(lyric_text));
+    if (*lrc_text)
+        ne_jval_put(out, "lrc", ne_jval_new_str(lrc_text));
+    if (*tlyric_text)
+        ne_jval_put(out, "tlyric", ne_jval_new_str(tlyric_text));
     if (*klyric_text)
         ne_jval_put(out, "klyric", ne_jval_new_str(klyric_text));
+    const char *lyric_text = *lrc_text ? lrc_text : tlyric_text;
+    if (*lyric_text)
+        ne_jval_put(out, "lyric", ne_jval_new_str(lyric_text));
     ne_jval_free(root);
     ne_resp_free(r);
     cli_print_marshal(out);

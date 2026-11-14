@@ -543,8 +543,9 @@ def build_cases(stub):
          stdout='{"code":200,"result":{"songs":['
                 '{"id":111,"name":"歌\\u0026A"},'
                 '{"id":222,"name":"歌B"}]}}\n')
-    case("lyric tlyric preferred", ["lyric", "111"],
-         stdout='{"code":200,"lyric":"[00:01]翻译"}\n')
+    case("lyric original + translation", ["lyric", "111"],
+         stdout='{"code":200,"lrc":"[00:01]原文","lyric":"[00:01]原文",'
+                '"tlyric":"[00:01]翻译"}\n')
     case("song-url fallback", ["song-url", "111"],
          stdout='{"code":200,"data":'
                 '[{"br":320000,"code":200,"url":"http://a/old.mp3"}]}\n')
