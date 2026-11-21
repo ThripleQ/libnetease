@@ -677,17 +677,44 @@ static const char *jar_or(const ne_jar *j, const char *name,
     return (v && *v) ? v : fallback;
 }
 
+/* Look up an override in the {name,value,...} NULL-terminated list, else the
+ * value the cookie jar would have supplied. */
+static const char *extra_or(const char *const *extras, const char *name,
+                            const char *fallback) {
+    for (size_t i = 0; extras && extras[2 * i]; i++)
+        if (strcmp(extras[2 * i], name) == 0 && extras[2 * i + 1])
+            return extras[2 * i + 1];
+    return fallback;
+}
+
 ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
+    return ne_call_eapi_ext(url, eapi_path, data, NULL);
+}
+
+ne_resp *ne_call_eapi_ext(const char *url, const char *eapi_path, jmap *data,
+                          const char *const *extra_cookies) {
     /* Locked snapshot: every pointer read here points into `snap`, our own
      * copy, so the extras kept alive across post_common() (which strdup's them
      * into its scratch) cannot dangle even if another thread writes g_jar. */
     ne_jar *snap = jar_snapshot();
 
     /* CookieValueByName(options.Cookies, name, fallback) — options.Cookies
-     * for eapi is just the jar (no extras in any current service) */
-    const char *os = jar_or(snap, "os", "ios");
-    const char *appver = jar_or(snap, "appver",
-                                strcmp(os, "pc") != 0 ? "9.0.65" : "");
+     * for eapi is just the jar, except for the identity keys a service may
+     * override (see ne_call_eapi_ext). */
+    const char *os = extra_or(extra_cookies, "os", jar_or(snap, "os", "ios"));
+    const char *appver = extra_or(extra_cookies, "appver",
+                                  jar_or(snap, "appver",
+                                         strcmp(os, "pc") != 0 ? "9.0.65" : ""));
+    const char *osver = extra_or(extra_cookies, "osver",
+                                 jar_or(snap, "osver", "17.4.1"));
+    const char *channel = extra_or(extra_cookies, "channel",
+                                   jar_or(snap, "channel", ""));
+    const char *versioncode = extra_or(extra_cookies, "versioncode",
+                                       jar_or(snap, "versioncode", "140"));
+    const char *mobilename = extra_or(extra_cookies, "mobilename",
+                                      jar_or(snap, "mobilename", ""));
+    const char *resolution = extra_or(extra_cookies, "resolution",
+                                      jar_or(snap, "resolution", "1920x1080"));
 
     char buildver[32];
     snprintf(buildver, sizeof buildver, "%s", jar_or(snap, "buildver", ""));
@@ -708,16 +735,16 @@ ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
     const char *ma = ne_jar_get(snap, "MUSIC_A");
 
     jmap *header = jmap_new();
-    jmap_put(header, "osver", jar_or(snap, "osver", "17.4.1"));
+    jmap_put(header, "osver", osver);
     jmap_put(header, "deviceId", device_id_v);
     jmap_put(header, "appver", appver);
-    jmap_put(header, "versioncode", jar_or(snap, "versioncode", "140"));
-    jmap_put(header, "mobilename", jar_or(snap, "mobilename", ""));
+    jmap_put(header, "versioncode", versioncode);
+    jmap_put(header, "mobilename", mobilename);
     jmap_put(header, "buildver", buildver);
-    jmap_put(header, "resolution", jar_or(snap, "resolution", "1920x1080"));
+    jmap_put(header, "resolution", resolution);
     jmap_put(header, "__csrf", jar_or(snap, "__csrf", ""));
     jmap_put(header, "os", os);
-    jmap_put(header, "channel", jar_or(snap, "channel", ""));
+    jmap_put(header, "channel", channel);
     jmap_put(header, "requestId", request_id);
     if (mu && *mu) jmap_put(header, "MUSIC_U", mu);
     if (ma && *ma) jmap_put(header, "MUSIC_A", ma);
@@ -741,16 +768,16 @@ ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data) {
      * SetCookies them after the options.Cookies loop) */
     const char *extras[32];
     int n = 0;
-    extras[n++] = "osver";      extras[n++] = jar_or(snap, "osver", "17.4.1");
+    extras[n++] = "osver";      extras[n++] = osver;
     extras[n++] = "deviceId";   extras[n++] = device_id_v;
     extras[n++] = "appver";     extras[n++] = appver;
-    extras[n++] = "versioncode";extras[n++] = jar_or(snap, "versioncode", "140");
-    extras[n++] = "mobilename"; extras[n++] = jar_or(snap, "mobilename", "");
+    extras[n++] = "versioncode";extras[n++] = versioncode;
+    extras[n++] = "mobilename"; extras[n++] = mobilename;
     extras[n++] = "buildver";   extras[n++] = buildver;
-    extras[n++] = "resolution"; extras[n++] = jar_or(snap, "resolution", "1920x1080");
+    extras[n++] = "resolution"; extras[n++] = resolution;
     extras[n++] = "__csrf";     extras[n++] = jar_or(snap, "__csrf", "");
     extras[n++] = "os";         extras[n++] = os;
-    extras[n++] = "channel";    extras[n++] = jar_or(snap, "channel", "");
+    extras[n++] = "channel";    extras[n++] = channel;
     extras[n++] = "requestId";  extras[n++] = request_id;
     if (mu && *mu) { extras[n++] = "MUSIC_U"; extras[n++] = mu; }
     if (ma && *ma) { extras[n++] = "MUSIC_A"; extras[n++] = ma; }

@@ -275,11 +275,11 @@ typedef struct {
 | `ne_qr_check(unikey,&code,&len)` | 轮询：800 待扫码 / 801 已过期 / 802 待确认 / 803 登录成功（cookie 已进 jar） |
 | `ne_qr_build_url(unikey)` | 拼二维码内容 `http://music.163.com/login?codekey=…&chainId=…` |
 
-## 5. CLI 参考（42 命令，与 Go 版协议一致）
+## 5. CLI 参考（43 命令，与 Go 版协议一致；`scrobble` 为 C 版新增）
 
 登录：`qr-key` `qr-check` `qr-render <key> <file.png>` `qr-image <key>` `login-email` `login-cellphone` `login-refresh` `login-status`
 读：`search <kw> [type]` `search-pl <kw>` `check-music <id>` `record-recent [n]` `recommend-resource` `recommend-songs` `recommend-playlists [n]` `song-url <id> [level]` `song-download-url <id> [level]` `song-music-quality <id>` `check-quality <id> <level>` `song-purchased [limit offset]` `album-purchased [limit offset]` `album <id>` `song-detail <ids…>` `playlist <id>` `playlist-cover <id>` `user-playlist <uid>` `liked` `liked-check <song_id>` `toplist` `lyric <id>` `playlist-tracks <id>` `account-name` `account-info` `vip-info` `playlists`
-写：`like <id> <like\|unlike>` `subscribe <id> <t>` `track-add <pid> <sid>` `track-del <pid> <sid>` `playlist-create <name>` `playlist-rename <pid> <name>` `playlist-delete <pid>`
+写：`like <id> <like\|unlike>` `subscribe <id> <t>` `track-add <pid> <sid>` `track-del <pid> <sid>` `playlist-create <name>` `playlist-rename <pid> <name>` `playlist-delete <pid>` `scrobble <song_id> [source_id] [time_sec] [source]`（播放上报：clientlog eapi，会给账号留听歌记录）
 
 CLI 行为：启动时 load `~/.cache/netune/cookies.txt`，退出时持久化（假 NMTID 被 filterJar 过滤不落盘）。stdout 输出协议与 Go 版逐字节对齐。
 

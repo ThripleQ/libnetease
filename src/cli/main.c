@@ -266,6 +266,12 @@ int main(int argc, char **argv) {
     } else if (strcmp(cmd, "playlist-delete") == 0) {
         if (argc < 3) cli_die("usage: netease-cli playlist-delete <playlist_id>");
         rc = cli_envelope(ne_playlist_delete(argv[2]));
+    } else if (strcmp(cmd, "scrobble") == 0) {
+        if (argc < 3) cli_die("usage: netease-cli scrobble <song_id> [source_id] [time_sec] [source]");
+        rc = cli_envelope(ne_scrobble(argv[2],
+                                      argc > 3 ? argv[3] : NULL,
+                                      argc > 4 ? argv[4] : NULL,
+                                      argc > 5 ? argv[5] : NULL));
     } else if (strcmp(cmd, "artist") == 0) {
         if (argc < 3) cli_die("usage: netease-cli artist <id>");
         rc = cli_pass(ne_artist_detail(argv[2]));

@@ -1023,3 +1023,84 @@ ne_resp *ne_album_sublist(const char *limit, const char *offset) {
     jmap_free(data);
     return r;
 }
+
+/* ── 播放上报（2026-11-21）────────────────────────────────────────────
+ *
+ * 端点：https://clientlog.music.163.com/eapi/feedback/weblog
+ * 网上广为流传的 /weapi/feedback/weblog 依旧回 200 + {"data":"success"}，
+ * 但**不计入听歌排行**（hana-music-api#31 实测）。真正生效的是这条 clientlog
+ * 的 eapi 路径，且要发两条日志：startplay（开始播放）+ play（带时长）。
+ *
+ * 身份必须是桌面端：服务端按 cookie 里的 os/appver 判断客户端。安卓 WebView
+ * 登录导入的 jar 里没有这几个键（或保留着网页端的值），直接发会被当作未知
+ * 客户端。所以这里用 ne_call_eapi_ext 覆盖成官方 macOS 客户端那套。 */
+
+static const char *const SCROBBLE_COOKIES[] = {
+    "os",      "osx",
+    "appver",  "3.1.10.5100",
+    "osver",   "15.5",
+    "channel", "netease",
+    NULL
+};
+
+/* 只接受纯十进制非负整数；调用方传进来的是 song id / 秒数，永远不该带别的字符。
+ * 解析失败返回 0 —— 不把任意字符串拼进 JSON。 */
+static long long scrobble_num(const char *s, long long max) {
+    if (!s || !*s) return 0;
+    char *end = NULL;
+    long long v = strtoll(s, &end, 10);
+    if (end == s || *end != '\0' || v < 0) return 0;
+    return v > max ? max : v;
+}
+
+ne_resp *ne_scrobble(const char *song_id, const char *source_id,
+                     const char *time_sec, const char *source) {
+    long long sid = scrobble_num(song_id, 9999999999LL);
+    long long srcid = scrobble_num(source_id, 9999999999LL);
+    long long played = scrobble_num(time_sec, 86400);
+
+    /* source 会原样进 JSON 字符串：只放行 [a-z_] 白名单，其余回落 "list"。 */
+    const char *src = "list";
+    if (source && *source) {
+        size_t n = strlen(source);
+        int ok = n <= 16;
+        for (size_t i = 0; ok && i < n; i++) {
+            char c = source[i];
+            if (!((c >= 'a' && c <= 'z') || c == '_')) ok = 0;
+        }
+        if (ok) src = source;
+    }
+
+    const char *ovr = getenv("NE_API_BASE");
+    char url[640];
+    if (ovr && *ovr)
+        snprintf(url, sizeof url, "%s/api/feedback/weblog", ne_api_base());
+    else
+        snprintf(url, sizeof url,
+                 "https://clientlog.music.163.com/api/feedback/weblog");
+
+    char start_logs[512];
+    snprintf(start_logs, sizeof start_logs,
+             "[{\"action\":\"startplay\",\"json\":{\"id\":%lld,\"type\":\"song\","
+             "\"mainsite\":\"1\",\"mainsiteWeb\":\"1\",\"content\":\"id=%lld\"}}]",
+             sid, srcid);
+
+    char play_logs[768];
+    snprintf(play_logs, sizeof play_logs,
+             "[{\"action\":\"play\",\"json\":{\"download\":0,\"end\":\"playend\","
+             "\"id\":%lld,\"sourceId\":%lld,\"time\":%lld,\"type\":\"song\","
+             "\"wifi\":0,\"source\":\"%s\",\"mainsite\":\"1\","
+             "\"mainsiteWeb\":\"1\",\"content\":\"id=%lld\"}}]",
+             sid, srcid, played, src, srcid);
+
+    jmap *data = jmap_new();
+    jmap_put(data, "logs", start_logs);
+    ne_resp *r = ne_call_eapi_ext(url, "/api/feedback/weblog", data,
+                                  SCROBBLE_COOKIES);
+    ne_resp_free(r);
+
+    data = jmap_new();
+    jmap_put(data, "logs", play_logs);
+    return ne_call_eapi_ext(url, "/api/feedback/weblog", data,
+                            SCROBBLE_COOKIES);
+}

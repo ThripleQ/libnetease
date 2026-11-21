@@ -105,6 +105,17 @@ ne_resp *ne_call_linuxapi(const char *url, jmap *data,
  * is merged INTO `data` (ownership taken by the call). */
 ne_resp *ne_call_eapi(const char *url, const char *eapi_path, jmap *data);
 
+/* 同 ne_call_eapi，但允许调用方覆盖 eapi header / 请求 cookie 里的身份字段
+ * （os / appver / osver / channel / versioncode / mobilename / resolution）。
+ * extra_cookies = {name,value} NULL-terminated pairs；未列出的字段仍取 cookie jar。
+ *
+ * 用于「必须冒充某个官方客户端身份」的端点：播放上报
+ * （clientlog.music.163.com）只在 os=osx + appver=3.1.10.5100 + osver=15.5 +
+ * channel=netease 这套桌面端身份下被服务端受理 —— 用安卓 WebView 登录来的
+ * cookie 身份会被当成未知客户端。 */
+ne_resp *ne_call_eapi_ext(const char *url, const char *eapi_path, jmap *data,
+                          const char *const *extra_cookies);
+
 /* util.ApplyRequestStrategy — inject os=pc + FIXED fake NMTID into the jar.
  * The fake NMTID is dropped AT THE JAR BOUNDARY (filterJar.SetCookies), so it
  * never reaches memory, disk, or the wire — only os=pc actually takes effect.

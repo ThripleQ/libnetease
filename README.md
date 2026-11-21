@@ -53,7 +53,7 @@ TLS 指纹层（curl-impersonate / LD_PRELOAD）接入见 docs/RISKS.md 第八�
 | 歌单 | `playlist` `playlist-tracks` `user-playlist` `playlists` `toplist` `recommend-resource` `recommend-songs` `recommend-playlists` `record-recent` |
 | 红心 | `liked` `liked-check` `like` |
 | 登录 | `qr-key` `qr-check` `qr-render` `qr-image` `login-email` `login-cellphone` `login-refresh` `login-status` |
-| 写操作 | `subscribe` `track-add` `track-del` `playlist-create` `playlist-rename` `playlist-delete` `account-name` |
+| 写操作 | `subscribe` `track-add` `track-del` `playlist-create` `playlist-rename` `playlist-delete` `account-name` `scrobble` |
 
 ## 差分对照（dualrun.py）
 

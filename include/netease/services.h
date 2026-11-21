@@ -316,4 +316,27 @@ ne_resp *ne_album_subscribe(const char *id, const char *t);
  * limit 并自己分页累积。 */
 ne_resp *ne_album_sublist(const char *limit, const char *offset);
 
+/* ── 播放上报（2026-11-21）──────────────────────────────────────────
+ * 「上报到网易云」：把一首歌的播放记进听歌记录 / 听歌排行。
+ *
+ * 走的**不是** `/weapi/feedback/weblog` —— 那条路径 HTTP 200 + `data:"success"`
+ * 但不计入排行（hana-music-api#31 实测）。可用路径是 clientlog 的 eapi 端点，
+ * 且必须冒充桌面端身份（os=osx / appver=3.1.10.5100 / osver=15.5 /
+ * channel=netease），见 ne_call_eapi_ext。 */
+
+/* ScrobbleService —— 依次向 clientlog.music.163.com 发两条 eapi 日志：
+ *   1. startplay：标记「开始播放」；
+ *   2. play：带实际收听时长，这条才计入排行。
+ *
+ * 参数：
+ *   - song_id    歌曲 id（必填，纯数字；非法时按 0 发出，服务端会忽略）；
+ *   - source_id  来源 id（歌单 / 专辑 / 电台 id）；空或非法 → 0；
+ *   - time_sec   实际收听秒数（≥0，上限 86400）；
+ *   - source     来源类型，默认 "list"（白名单外的值也回落到 "list"）。
+ *
+ * ⚠️ 这是**写**接口：会给调用者的账号留下听歌记录，且第三方上报有账号风控
+ * 风险（见 docs/RISKS.md）。返回 200 只代表请求被收下，不代表已计入排行。 */
+ne_resp *ne_scrobble(const char *song_id, const char *source_id,
+                     const char *time_sec, const char *source);
+
 #endif
